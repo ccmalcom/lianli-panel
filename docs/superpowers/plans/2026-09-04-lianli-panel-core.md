@@ -44,7 +44,7 @@ Every task's requirements implicitly include this section.
 - [ ] **Step 1: Create the venv and project skeleton**
 
 ```bash
-cd ~/Projects/lianli-panel
+cd ~/Documents/Code/lianli-panel
 python3 -m venv --system-site-packages .venv
 ./.venv/bin/pip install -q pytest
 ./.venv/bin/python -c "import PySide6, PIL, pytest; print('ok')"
@@ -3146,7 +3146,7 @@ echo "before the originals are deleted."
 These need root and must not be attempted by an agent. Present them exactly:
 
 ```bash
-sudo sh ~/Projects/lianli-panel/tools/migrate_assets.sh
+sudo sh ~/Documents/Code/lianli-panel/tools/migrate_assets.sh
 ```
 
 Wait for confirmation that it ran before continuing.
