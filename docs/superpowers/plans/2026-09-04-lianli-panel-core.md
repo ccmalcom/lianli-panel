@@ -31,6 +31,103 @@ Every task's requirements implicitly include this section.
 
 ---
 
+## Execution: who runs which task
+
+Tasks are split between **Codex dispatches** and the **controller** (Claude
+Code). The split is not about task size or difficulty — it follows from three
+hard limits of Codex's sandbox, each observed rather than assumed:
+
+| Limit | Observed | Consequence |
+|---|---|---|
+| The daemon socket is unreachable | `PermissionError: [Errno 1]` on connect, twice, despite mode 0666 | Every step that talks to the daemon is controller work |
+| No network | `pip install` cannot run | The venv must exist *before* any dispatch |
+| Writes are workspace-scoped | — | `/var/tmp/...` and `/var/lib/...` edits are controller work |
+
+**The rule: Codex writes the code and makes the unit tests green. The controller
+owns every step that touches the socket, the hardware, the network, or a path
+outside the repo.**
+
+That line is clean here because the plan was already built that way — the pure
+logic is tested with `FakeClient` and the daemon checks are separate, explicitly
+numbered steps.
+
+### Routing
+
+| Task | Runs as | Why |
+|---|---|---|
+| 1 Scaffold + ipc | **Controller** | `pip install pytest` needs network; Step 8 hits the socket |
+| 2 Schema extraction | **Controller** | The extractor's entire purpose is probing the daemon |
+| 3 Model round-trip | **Codex** | Pure; reads `gaming-dash.json` read-only |
+| 4 Ranges + validation | **Codex** ← best fit | Pure logic, 16 tests, no I/O at all |
+| 5 Renderer | **Split** | Codex: steps 1–4 (`FakeClient`). Controller: step 5, the execution proof |
+| 6 Health | **Split** | Codex: steps 1–4 (synthetic lines). Controller: step 5, the live journal |
+| 7 Apply | **Codex** ← best fit | Entirely `FakeClient`; 11 tests; the most invariant-dense task |
+| 8 Snapshot | **Codex** | `tmp_path` only. Controller runs step 5 |
+| 9 Sensors | **Split** | Codex: steps 1–4. Controller: step 5, which needs the daemon to prove the tiers diverge |
+| 10 Ring + poller | **Split** | Codex: `ring.py` + tests. Controller: the `thermal-rgb.py` edit (outside the repo) and steps 6–7 (**writes to hardware**) |
+| 11 CLI | **Codex** | Steps 1–5. Controller runs step 6 against the daemon |
+| 12 Relocation + E2E | **Controller + Chase** | Root commands and a look at the physical screen |
+
+### Before the first dispatch
+
+Task 1 must be complete and committed. Dispatches run in the repo directory,
+**not** an isolated worktree — `.venv/` is gitignored and would not exist in one,
+so every gate would fail on a missing `pytest`.
+
+### Gate commands
+
+Give each dispatch only its own test file, never the whole suite:
+
+```bash
+./.venv/bin/pytest tests/test_<module>.py -v
+```
+
+**Verify the gate matches tests before sending it**, because a pytest path that
+matches nothing still exits 0 and reads as a pass:
+
+```bash
+./.venv/bin/pytest --collect-only -q tests/test_<module>.py
+```
+
+Confirm the collected count equals the count the task states. A silent
+zero-match gate is the failure mode to guard against here — it produces no red
+X, just a green run that proves nothing.
+
+### Dispatch brief
+
+Lift the task text **verbatim** from this plan. Add:
+
+```
+Work in /home/chase/Documents/Code/lianli-panel (not a worktree).
+Implement ONLY Task N steps <range>. Do not start any other task.
+
+Gate: ./.venv/bin/pytest tests/test_<module>.py -v   (expect <N> passed)
+
+Do NOT attempt any step marked as controller work: anything calling the daemon
+socket at /run/lianli/lianli-daemon.sock, anything under /var/tmp or /var/lib,
+and anything needing network or sudo. The socket returns EPERM in your sandbox.
+If a step needs one, say so and stop -- never fabricate a result.
+
+Treat every code block in the task as an UNVERIFIED SKETCH: it has not been run.
+If it does not work, report the deviation rather than silently adapting, and do
+not invent a type to work around one that does not exist.
+
+Do not run git commit. Chase commits by hand.
+```
+
+The controller then re-runs the gate itself, reviews the diff, and commits.
+A Codex report of green is a claim, not verification.
+
+### What the controller must not delegate
+
+The daemon-verification steps are the point of those tasks, not decoration.
+Task 5 step 5 in particular is the only thing that proves command substitution
+actually prevents execution rather than merely being coded to — if it is skipped
+because a dispatch reported the unit tests green, the plan's central architectural
+bet goes unverified.
+
+---
+
 ### Task 1: Repo scaffold and IPC client
 
 **Files:**
