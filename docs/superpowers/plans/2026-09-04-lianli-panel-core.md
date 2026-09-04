@@ -341,6 +341,20 @@ def test_radial_gauge_requires_span_and_ranges():
 def test_every_variant_spec_is_populated():
     for name, spec in schema.WIDGET_KINDS.items():
         assert spec.name == name
+
+
+def test_no_variant_extracted_an_empty_required_list():
+    """Guards the extractor's silent-partial failure mode: a stall returns a
+    SHORT field tuple, and asserting only on names or on the 12/14 counts would
+    pass with every list empty.
+
+    Every widget kind draws something and every source produces a value, so no
+    variant here legitimately has zero required fields. If a future daemon adds
+    a genuinely field-less variant, exempt it BY NAME rather than weakening
+    this to a >= 0 check."""
+    empty = [n for n, s in {**schema.WIDGET_KINDS, **schema.SOURCE_TYPES}.items()
+             if not s.required]
+    assert empty == [], f"extraction stalled for: {empty}"
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -388,16 +402,36 @@ SOURCES = ("constant", "command", "hwmon", "nvidia_gpu", "amd_gpu_usage",
 FONT = "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf"
 MISSING = re.compile(r"missing field `([^`]+)`")
 
-# Placeholders by field name. The daemon type-checks, so a wrong type produces
-# "invalid type" rather than "missing field" and would stall the loop.
+# Placeholders by field name. The daemon TYPE-CHECKS, so a wrong type produces
+# "invalid type" rather than "missing field" -- which the loop cannot act on, so
+# it stalls and returns a PARTIAL field list. That failure is silent unless the
+# extractor exits nonzero, which is why it does.
+#
+# The bare-float default is only safe for genuinely numeric fields. Anything
+# taking a string, bool, integer or colour array needs an entry here. The list
+# below covers every non-float required field found in the daemon's serde
+# variants; extend it rather than letting the default absorb a new one.
 PLACEHOLDERS = {
+    # nested objects
     "source": {"type": "constant", "value": 1.0},
     "font": {"path": FONT},
     "ranges": [{"max": None, "color": [255, 255, 255], "alpha": 255}],
+    # colour arrays
     "color": [255, 255, 255, 255],
     "background_color": [0, 0, 0, 0],
     "gauge_background_color": [60, 60, 60],
+    "line_color": [255, 255, 255],
+    "fill_color": [255, 255, 255, 80],
+    "border_color": [255, 255, 255],
+    "needle_color": [255, 0, 0],
+    "needle_border_color": [0, 0, 0],
+    "tick_color": [200, 200, 200],
+    "face_color": [20, 20, 20],
+    "hour_hand_color": [255, 255, 255],
+    "minute_hand_color": [255, 255, 255],
+    "second_hand_color": [255, 0, 0],
     "colors": [[255, 255, 255]],
+    # strings
     "text": "x",
     "format": "{:.0}",
     "unit": "",
@@ -406,6 +440,24 @@ PLACEHOLDERS = {
     "cmd": "echo 1",
     "name": "coretemp",
     "label": "x",
+    "metric": "temp",            # nvidia_gpu enum
+    "iface": "lo",               # network_rx / network_tx
+    "device": "sda",             # disk_read / disk_write
+    "device_id": "hid:probe",    # wireless_coolant
+    "fit": "contain",            # image / video enum
+    # integers
+    "gpu_index": 0,
+    "card_index": 0,
+    "tick_count": 8,
+    "history_length": 60,
+    # booleans
+    "loop_playback": False,
+    "show_labels": False,
+    "auto_range": False,
+    "show_gauge": True,
+    "show_needle": True,
+    "show_seconds": True,
+    # floats
     "value": 1.0,
 }
 NUMERIC_DEFAULT = 1.0
@@ -421,8 +473,17 @@ def envelope(widget_kind: dict) -> dict:
     }
 
 
-def required_fields(client: Client, build) -> tuple[str, ...]:
-    """Add placeholders until the template validates. Returns fields in order."""
+STALLED: list[str] = []
+
+
+def required_fields(client: Client, build, label: str) -> tuple[str, ...]:
+    """Add placeholders until the template validates. Returns fields in order.
+
+    A stall means a placeholder had the WRONG TYPE: the daemon answered
+    "invalid type" instead of "missing field", which the loop cannot act on, so
+    the field list here is partial. Recorded so main() can exit nonzero -- a
+    partial schema that looks successful is worse than no schema.
+    """
     found: list[str] = []
     for _ in range(60):
         try:
@@ -432,13 +493,16 @@ def required_fields(client: Client, build) -> tuple[str, ...]:
         except DaemonError as exc:
             m = MISSING.search(str(exc))
             if not m:
-                print(f"  stalled: {exc}", file=sys.stderr)
+                STALLED.append(f"{label}: {exc} (found so far: {found})")
+                print(f"  STALLED {label}: {exc}", file=sys.stderr)
                 return tuple(found)
             field = m.group(1)
             if field in found:
-                print(f"  repeated {field}: {exc}", file=sys.stderr)
+                STALLED.append(f"{label}: repeated {field} — placeholder rejected")
+                print(f"  STALLED {label}: repeated {field}: {exc}", file=sys.stderr)
                 return tuple(found)
             found.append(field)
+    STALLED.append(f"{label}: exceeded 60 iterations")
     return tuple(found)
 
 
@@ -471,7 +535,7 @@ def main() -> None:
     kind_specs = {}
     for kind in KINDS:
         print(f"probing kind {kind}", file=sys.stderr)
-        req = required_fields(client, lambda fs, k=kind: fill(k, fs))
+        req = required_fields(client, lambda fs, k=kind: fill(k, fs), f"kind {kind}")
         opt = tuple(sorted(seen_kinds.get(kind, set()) - set(req)))
         kind_specs[kind] = (req, opt)
 
@@ -492,9 +556,18 @@ def main() -> None:
 
         # The outer value_text fields are already satisfied, so any reported
         # missing field belongs to the source being probed.
-        req = required_fields(client, build)
+        req = required_fields(client, build, f"source {src}")
         opt = tuple(sorted(seen_sources.get(src, set()) - set(req)))
         src_specs[src] = (req, opt)
+
+    if STALLED:
+        print(f"\n{len(STALLED)} variant(s) STALLED — the schema is PARTIAL:",
+              file=sys.stderr)
+        for s in STALLED:
+            print(f"  {s}", file=sys.stderr)
+        print("\nAdd a correctly-typed entry to PLACEHOLDERS for each field named "
+              "above and re-run. Do NOT commit a partial schema.", file=sys.stderr)
+        raise SystemExit(1)
 
     emit(kind_specs, src_specs)
 
@@ -545,17 +618,35 @@ if __name__ == "__main__":
 
 Run:
 ```bash
-./.venv/bin/python tools/extract_schema.py > lianli_panel/schema.py
-./.venv/bin/python -c "from lianli_panel import schema; print(len(schema.KIND_NAMES), len(schema.SOURCE_NAMES))"
+./.venv/bin/python tools/extract_schema.py > /tmp/schema.py
+echo "extractor exit: $?"
 ```
-Expected: `12 14`
 
-If the extractor reports `stalled:` for any variant on stderr, read the message. A stall means a placeholder had the wrong type — add the correct one to `PLACEHOLDERS` and re-run. Do not proceed with a partial schema.
+The extractor **exits 1 if any variant stalled**, so a nonzero exit means the
+schema is partial — read the `STALLED` lines on stderr, add a correctly-typed
+entry to `PLACEHOLDERS` for each field named, and re-run. Do not continue with a
+partial schema, and do not redirect straight over `lianli_panel/schema.py`: a
+failed run would truncate it to a stub that still imports.
+
+Only once it exits 0:
+
+```bash
+mv /tmp/schema.py lianli_panel/schema.py
+./.venv/bin/python -c "
+from lianli_panel import schema
+print(len(schema.KIND_NAMES), len(schema.SOURCE_NAMES))
+for n, s in {**schema.WIDGET_KINDS, **schema.SOURCE_TYPES}.items():
+    print(f'{n:20} required={s.required}')
+"
+```
+Expected: `12 14`, then a line per variant with a **non-empty** `required` tuple.
+Counting 12 and 14 proves only that the loop ran, not that extraction succeeded —
+a stalled variant is still counted. Read the tuples.
 
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `./.venv/bin/pytest tests/test_schema.py -v`
-Expected: PASS, 5 passed
+Expected: PASS, 6 passed
 
 - [ ] **Step 6: Commit**
 
@@ -1078,7 +1169,7 @@ def validate(t: Template) -> list[Problem]:
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `./.venv/bin/pytest tests/test_model_ranges.py -v`
-Expected: PASS, 17 passed
+Expected: PASS, 16 passed
 
 - [ ] **Step 5: Check the real template validates clean**
 
@@ -1254,6 +1345,33 @@ def test_requests_inside_the_debounce_window_collapse_to_one():
     fired = [c.request(now=100.1 + i * 0.01) for i in range(10)]
     assert fired.count(True) == 0  # all inside the 250ms window
     assert c.pending is True
+
+
+def test_a_request_held_by_the_debounce_window_still_fires_eventually():
+    """REGRESSION. A request arriving after finish() but inside the debounce
+    window has no in-flight render to release it. Without a polled due() it
+    stays pending forever and the final state of a drag never renders."""
+    c = Coalescer(0.25)
+    c.request(now=100.0)
+    c.finish(now=100.1)
+    assert c.request(now=100.15) is False
+    assert c.pending is True
+    assert c.due(now=100.20) is False   # still inside the window
+    assert c.due(now=100.30) is True    # window elapsed, so it fires
+    assert c.pending is False
+
+
+def test_due_does_nothing_when_nothing_is_held():
+    c = Coalescer(0.25)
+    assert c.due(now=200.0) is False
+
+
+def test_due_does_not_fire_while_a_render_is_in_flight():
+    c = Coalescer(0.25)
+    c.request(now=100.0)
+    c.request(now=100.01)
+    assert c.due(now=101.0) is False    # in flight, despite the window elapsing
+    assert c.pending is True
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1336,8 +1454,16 @@ class PreviewRenderer:
 class Coalescer:
     """At most one render in flight; never drop the newest request.
 
-    request() -> True means "send now". False means "held"; the held request is
-    released by the next finish(), so the final state of a drag always renders.
+    THREE WAYS A HELD REQUEST GETS RELEASED, and the third is easy to forget:
+      finish() -- a render completed and something newer is waiting
+      due()    -- the debounce window elapsed with nothing in flight
+      request()-- the window had already elapsed, so it fires immediately
+
+    due() is not optional. A request arriving AFTER finish() but INSIDE the
+    debounce window has no in-flight render to release it, so without a polled
+    due() it would stay pending forever and the final state of a drag would
+    never render -- the exact failure this class exists to prevent. The Qt layer
+    polls due() on a short timer.
     """
 
     def __init__(self, interval_s: float = 0.25) -> None:
@@ -1353,13 +1479,19 @@ class Coalescer:
         self._fire(now)
         return True
 
-    def finish(self, now: float) -> bool:
-        self.in_flight = False
-        if not self.pending:
+    def due(self, now: float) -> bool:
+        """True when a held request may now be sent."""
+        if not self.pending or self.in_flight:
+            return False
+        if (now - self._last_fire) < self.interval_s:
             return False
         self.pending = False
         self._fire(now)
         return True
+
+    def finish(self, now: float) -> bool:
+        self.in_flight = False
+        return self.due(now)
 
     def _fire(self, now: float) -> None:
         self.in_flight = True
@@ -1369,7 +1501,7 @@ class Coalescer:
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `./.venv/bin/pytest tests/test_render.py -v`
-Expected: PASS, 12 passed
+Expected: PASS, 15 passed
 
 - [ ] **Step 5: Prove the substitution really prevents execution**
 
@@ -1508,6 +1640,47 @@ def test_no_open_line_at_all_is_unhealthy():
     h = parse_journal([])
     assert h.ok is False
     assert h.last_open is None
+
+
+def test_precise_timestamps_with_microseconds_parse():
+    """check() asks journalctl for short-iso-precise, so the parser must accept
+    fractional seconds. A regex written for whole seconds matches nothing here
+    and every line is silently skipped."""
+    precise = OPEN_LCD.replace("10:54:37-04:00", "10:54:37.687280-04:00")
+    assert parse_journal([precise]).ok is True
+
+
+def test_same_second_disconnect_after_open_is_still_unhealthy():
+    """A real replug logs the topology change and the ring reopen inside the
+    SAME second, so timestamp comparison alone calls them equal. Stream order
+    decides."""
+    open_same = OPEN_LCD.replace("10:54:37", "17:59:48")
+    topo_same = TOPOLOGY.replace("18:20:01", "17:59:48")
+    assert parse_journal([open_same, topo_same]).ok is False
+
+
+def test_same_second_reopen_after_disconnect_is_healthy():
+    topo_same = TOPOLOGY.replace("18:20:01", "17:59:48")
+    open_same = OPEN_LCD.replace("10:54:37", "17:59:48")
+    assert parse_journal([topo_same, open_same]).ok is True
+
+
+def test_real_replug_sequence_is_unhealthy():
+    """Verbatim shape of the 2026-09-02 replug: the encoder dies, the topology
+    changes twice, and only the LED RING reopens. The screen never does."""
+    seq = [
+        OPEN_LCD,
+        '2026-09-02T17:59:47-04:00 host lianli-daemon[1148]: INFO x: H264 chunk '
+        'write failed: USB error: No such device (it may have been disconnected)',
+        '2026-09-02T17:59:48-04:00 host lianli-daemon[1148]: INFO x: reopen '
+        'failed: USB error: No such device (it may have been disconnected)',
+        '2026-09-02T17:59:48-04:00 host lianli-daemon[1148]: INFO x: Wired '
+        'device topology changed (+0 -1): re-initializing',
+        '2026-09-02T18:00:10-04:00 host lianli-daemon[1148]: INFO x: Wired '
+        'device topology changed (+1 -0): re-initializing',
+        OPEN_RING.replace("10:54:37", "18:00:10"),
+    ]
+    assert parse_journal(seq).ok is False
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -1562,7 +1735,13 @@ RESTART_HINT = (
 _OPEN = re.compile(r"winusb::lcd::core:.*opened:\s*480x1920")
 _DISCONNECT = re.compile(r"topology changed|disconnect(ed)?|device removed",
                          re.IGNORECASE)
-_TS = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2})")
+# Fractional seconds are OPTIONAL in this pattern but REQUIRED in practice:
+# check() asks for short-iso-precise. Plain short-iso is whole-second, and a
+# real replug logs the disconnect and the reopen inside the SAME second, which
+# would compare equal and be read as healthy. Order is the tie-breaker anyway
+# (see below), but microseconds make the common case decidable on timestamp.
+_TS = re.compile(
+    r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?[+-]\d{2}:\d{2})")
 
 
 @dataclass
@@ -1584,17 +1763,32 @@ def _stamp(line: str) -> datetime | None:
 
 
 def parse_journal(lines: Iterable[str]) -> PanelHealth:
+    """Journal lines are consumed in order, oldest first.
+
+    ORDER IS THE TIE-BREAKER, not the timestamp. A real replug logs this:
+
+      17:59:47  H264 chunk write failed: ... (it may have been disconnected)
+      17:59:48  reopen failed: ... (it may have been disconnected)
+      17:59:48  Wired device topology changed (+0 -1): re-initializing
+      18:00:10  Wired device topology changed (+1 -0): re-initializing
+      18:00:10  Universal Screen 8.8" LED Ring opened: 60 LEDs
+
+    Note the last two share a second. Comparing timestamps alone would call
+    that pair equal; whichever came LAST in the stream is what actually
+    happened last, so the winner is tracked by sequence rather than by clock.
+    """
     last_open: datetime | None = None
     last_disconnect: datetime | None = None
+    last_event: str | None = None   # "open" | "disconnect"
 
     for line in lines:
         ts = _stamp(line)
         if ts is None:
             continue
         if _OPEN.search(line):
-            last_open = ts
+            last_open, last_event = ts, "open"
         elif _DISCONNECT.search(line):
-            last_disconnect = ts
+            last_disconnect, last_event = ts, "disconnect"
 
     if last_open is None:
         return PanelHealth(
@@ -1603,7 +1797,7 @@ def parse_journal(lines: Iterable[str]) -> PanelHealth:
             f"since this daemon started.\n{RESTART_HINT}",
             None, last_disconnect)
 
-    if last_disconnect is not None and last_disconnect > last_open:
+    if last_disconnect is not None and last_event == "disconnect":
         return PanelHealth(
             False,
             f"the panel was disconnected at {last_disconnect:%H:%M:%S} and has not "
@@ -1620,8 +1814,11 @@ def parse_journal(lines: Iterable[str]) -> PanelHealth:
 
 def check(unit: str = "lianli-daemon-system.service") -> PanelHealth:
     try:
+        # short-iso-precise, NOT short-iso: the latter is whole-second, and a
+        # replug's disconnect and reopen land in the same second.
         out = subprocess.run(
-            ["journalctl", "-u", unit, "-b", "--no-pager", "-o", "short-iso"],
+            ["journalctl", "-u", unit, "-b", "--no-pager", "-o",
+             "short-iso-precise"],
             capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return PanelHealth(False, f"could not read the journal: {exc}")
@@ -1634,7 +1831,7 @@ def check(unit: str = "lianli-daemon-system.service") -> PanelHealth:
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `./.venv/bin/pytest tests/test_health.py -v`
-Expected: PASS, 6 passed
+Expected: PASS, 10 passed
 
 - [ ] **Step 5: Check it against the live journal**
 
@@ -2776,10 +2973,47 @@ def reload_config():
     return _cfg
 ```
 
-Then call `reload_config()` at the top of each pass of the poll loop and read
-`_cfg["cool_c"]` etc. in place of the old constants. Do not leave the old
-constant names bound to stale values — delete them so a missed substitution
-raises `NameError` instead of silently using an outdated threshold.
+**Where `reload_config()` goes, precisely.** `main()` has two nested loops:
+
+```python
+while True:                      # respawn loop — runs once per nvidia-smi process
+    proc = gpu_stream()
+    for line in proc.stdout:     # sample loop — runs once per ~2s sample
+```
+
+Call it inside the **inner** `for line in proc.stdout:` loop. Putting it on the
+outer `while True:` would reload only when the long-lived `nvidia-smi` child
+exits — which is approximately never — so edits would appear to be ignored.
+
+Then read `_cfg["cool_c"]` etc. in place of the old constants. Delete the old
+constant names rather than leaving them bound to stale values, so a missed
+substitution raises `NameError` instead of silently using an outdated threshold.
+
+**`poll_ms` is the exception and needs the respawn loop.** `gpu_stream()` bakes
+it into the child at spawn time:
+
+```python
+f"--loop-ms={POLL_MS}"
+```
+
+so changing it cannot affect a stream that is already running. Handle it
+explicitly — break out of the sample loop when it changes, letting the outer
+loop respawn with the new interval:
+
+```python
+        for line in proc.stdout:
+            cfg = reload_config()
+            if cfg["poll_ms"] != spawned_poll_ms:
+                print(f"poll_ms {spawned_poll_ms} -> {cfg['poll_ms']}; "
+                      "restarting nvidia-smi", flush=True)
+                proc.terminate()
+                break            # outer while True respawns with the new value
+```
+
+capturing `spawned_poll_ms = _cfg["poll_ms"]` immediately before
+`proc = gpu_stream()`, and passing that value into the spawn. Without this the
+GUI would offer a poll-interval control that silently does nothing until the
+service is restarted.
 
 - [ ] **Step 6: Verify the poller reloads live**
 
@@ -2796,6 +3030,27 @@ sleep 5
 journalctl --user -u lianli-thermal-rgb.service -n 5 --no-pager
 ```
 Expected: a `config loaded: {...'cool_c': 40.0...}` line **without** a service restart.
+
+Then verify the `poll_ms` special case separately, since it is the one setting
+that cannot apply to a running stream:
+
+```bash
+./.venv/bin/python -c "
+from lianli_panel.ring import ThermalConfig, save_thermal, load_thermal
+c = load_thermal(); c.poll_ms = 3000; save_thermal(c); print('poll_ms -> 3000')
+"
+sleep 6
+journalctl --user -u lianli-thermal-rgb.service -n 5 --no-pager
+```
+Expected: a `poll_ms 2000 -> 3000; restarting nvidia-smi` line. If that does not
+appear, the reload is on the wrong loop.
+
+Restore the defaults afterwards so the ring keeps its tuned behaviour:
+`./.venv/bin/python -c "from lianli_panel.ring import ThermalConfig, save_thermal; save_thermal(ThermalConfig())"`
+
+**This step writes to hardware** — the poller drives the physical ring via
+`SetRgbEffect`, so changing its thresholds changes the ring's colour. Take a
+snapshot first (Task 8) if the current ring behaviour matters.
 
 The `sudo mkdir`/`chown` is a root step — hand it to Chase to run rather than attempting it.
 
@@ -2938,6 +3193,28 @@ def _stored(client, template_id: str) -> dict:
     raise SystemExit(f"no stored template with id {template_id!r}")
 
 
+def _lcd_fallback() -> dict | None:
+    """Newest snapshotted config.lcds entry, for rebuilding a wiped array.
+
+    Walks snapshots newest-first because the most recent one may itself have
+    been taken while the array was empty. Returns None if no snapshot has ever
+    recorded an entry, in which case apply_templates raises rather than
+    inventing an orientation and serial.
+    """
+    root = snapshot.SNAPSHOT_ROOT
+    if not root.exists():
+        return None
+    for d in sorted((p for p in root.iterdir() if p.is_dir()),
+                    key=lambda p: p.name, reverse=True):
+        try:
+            entries = snapshot.load(d).get("lcds") or []
+        except (OSError, ValueError):
+            continue
+        if entries:
+            return entries[0]
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     client = Client()
@@ -2972,8 +3249,14 @@ def main(argv: list[str] | None = None) -> int:
             snap = snapshot.take(client)
             print(f"snapshot: {snap}")
             templates, digest = apply_mod.read_templates(client)
-            apply_mod.apply_templates(client, templates, args.template_id,
-                                      base_hash=digest)
+            # The snapshot just taken records config.lcds, so it is the natural
+            # source for the fallback. Without this, apply fails outright once
+            # lianli-gui has wiped the array -- the exact hazard apply.py claims
+            # to handle. Prefer the newest snapshot that actually has an entry,
+            # since the one just taken reflects the wiped state too.
+            apply_mod.apply_templates(
+                client, templates, args.template_id, base_hash=digest,
+                lcd_entry_fallback=_lcd_fallback())
             h = health.check()
             print(f"applied {args.template_id}")
             print(("panel OK: " if h.ok else "WARNING: ") + h.reason)
@@ -3012,12 +3295,27 @@ def main(argv: list[str] | None = None) -> int:
                 print("no snapshots")
                 return 1
             data = snapshot.load(newest)
-            live = next((e.get("template_id") for e in data.get("lcds") or []), None)
-            if live is None:
+            entry = next(iter(data.get("lcds") or []), None)
+            if entry is None or entry.get("template_id") is None:
                 print(f"snapshot {newest.name} records no live template")
                 return 1
-            apply_mod.apply_templates(client, data["templates"], live)
-            print(f"restored {newest.name} (live: {live})")
+            live = entry["template_id"]
+            # Restore the snapshotted LCD entry too, not just the templates --
+            # orientation and serial live there, and reusing the CURRENT entry
+            # would silently keep a wiped or edited one.
+            apply_mod.apply_templates(client, data["templates"], live,
+                                      lcd_entry_fallback=entry)
+            print(f"restored templates and LCD entry from {newest.name} "
+                  f"(live: {live})")
+            # Say plainly what was NOT restored. Re-applying RGB here would
+            # fight the thermal poller, which re-drives the ring every ~2s.
+            print("NOT restored: RGB configuration, ring state, and the thermal "
+                  "service's on/off state. Reverting those would be overwritten "
+                  "by lianli-thermal-rgb.service within seconds; stop it first "
+                  "and use `ring` if you need them back.")
+            if data.get("thermal_service_active"):
+                print(f"  (thermal service was active when {newest.name} "
+                      "was taken)")
             return 0
 
         if args.cmd == "ring":
@@ -3048,6 +3346,19 @@ if __name__ == "__main__":
 [project.scripts]
 lianli-panel = "lianli_panel.cli:main"
 ```
+
+Declaring the entry point does not create it — the project must be installed for
+the wrapper to appear on PATH:
+
+```bash
+./.venv/bin/pip install -e . --no-deps
+./.venv/bin/lianli-panel --help
+```
+
+`--no-deps` because there are no runtime dependencies to resolve and the sandbox
+in which tasks may run has no network. Expected: the usage text listing every
+subcommand. Without this step `./.venv/bin/lianli-panel` does not exist and only
+`python -m lianli_panel.cli` works.
 
 - [ ] **Step 5: Run to verify it passes**
 
@@ -3091,7 +3402,9 @@ MSG
 
 ### Task 12: Asset relocation and end-to-end hardware verification
 
-Nothing before this task changed the physical panel. This one does, and it is the only task whose completion criterion is a look at the screen.
+This task changes the physical panel, and it is the only one whose completion criterion is a look at the screen.
+
+It is **not** the only task that writes to hardware: Task 10 restarts the thermal poller and changes its thresholds, and that poller drives the LED ring via `SetRgbEffect`. Everything else before this point is confined to previews, `FakeClient`, and read-only calls.
 
 **Files:**
 - Create: `docs/install.md`, `tools/migrate_assets.sh`
@@ -3190,7 +3503,10 @@ Confirm on the panel itself:
 - The clock is ticking (proving the render loop is live, not a frozen frame).
 
 If the panel shows the splash, `status` will say so; the fix is
-`sudo systemctl restart lianli-daemon-system.service` followed by `ring apply`.
+`sudo systemctl restart lianli-daemon-system.service`, then restart the ring driver so the LED comes back under control:
+`systemctl --user restart lianli-thermal-rgb.service`.
+
+(There is no `ring apply` subcommand — Task 11 defines only `ring off` and `ring static R G B`. The poller owns the ring's colour now, so restarting it is the equivalent of the old `rgb.sh apply`. A rainbow ring means nothing is driving it.)
 
 Then confirm the journal shows a real open, not just a prepare:
 
@@ -3247,4 +3563,6 @@ MSG
 
 **Known gap, stated rather than hidden.** `schema.py`'s `observed_optional` is not exhaustive, because the daemon ignores unknown fields and cannot be asked to enumerate them. The inspector will therefore render required fields confidently and optional ones only where a stored template has demonstrated them. Task 2's docstring says so; the GUI plan must not assume completeness.
 
-**Verification.** Tasks 1, 4, 5, 6, 8, 9, 11 and 12 each end with a check against the real daemon, not just pytest. Task 5's is the most important — it proves the substitution actually prevents execution rather than merely being coded to. Task 12 is the only task that writes to hardware, and its completion criterion is looking at the screen.
+**Verification.** Tasks 1, 4, 5, 6, 8, 9, 10, 11 and 12 each end with a check against the real daemon, not just pytest. Task 5's is the most important — it proves the substitution actually prevents execution rather than merely being coded to.
+
+**Two tasks write to hardware.** Task 10 drives the LED ring (the thermal poller calls `SetRgbEffect`), and Task 12 drives the panel. Task 12 is the only one whose completion criterion is looking at the screen. Everything else is confined to previews, `FakeClient`, and read-only calls.
