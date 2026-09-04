@@ -38,7 +38,7 @@ Code). The split is not about task size or difficulty — it follows from three
 hard limits of Codex's sandbox, each observed rather than assumed:
 
 | Limit | Observed | Consequence |
-|---|---|---|
+| --- | --- | --- |
 | The daemon socket is unreachable | `PermissionError: [Errno 1]` on connect, twice, despite mode 0666 | Every step that talks to the daemon is controller work |
 | No network | `pip install` cannot run | The venv must exist *before* any dispatch |
 | Writes are workspace-scoped | — | `/var/tmp/...` and `/var/lib/...` edits are controller work |
@@ -54,7 +54,7 @@ numbered steps.
 ### Routing
 
 | Task | Runs as | Why |
-|---|---|---|
+| --- | --- | --- |
 | 1 Scaffold + ipc | **Controller** | `pip install pytest` needs network; Step 8 hits the socket |
 | 2 Schema extraction | **Controller** | The extractor's entire purpose is probing the daemon |
 | 3 Model round-trip | **Codex** | Pure; reads `gaming-dash.json` read-only |
@@ -131,10 +131,12 @@ bet goes unverified.
 ### Task 1: Repo scaffold and IPC client
 
 **Files:**
+
 - Create: `pyproject.toml`, `lianli_panel/__init__.py`, `lianli_panel/ipc.py`, `tests/conftest.py`
 - Test: `tests/test_ipc.py`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `lianli_panel.ipc.Client(sock_path: str = DEFAULT_SOCK, timeout: float = 30.0)` with `call(method: str, params: dict | None = None) -> Any` returning the `data` payload; exceptions `DaemonError(message: str)`, `DaemonDown(DaemonError)`, `DaemonRefused(DaemonError)`. Constant `DEFAULT_SOCK = "/run/lianli/lianli-daemon.sock"`. Test double `tests.conftest.FakeClient` with `.responses: dict[str, Any]`, `.calls: list[tuple[str, dict]]`, and the same `call()` signature.
 
@@ -358,6 +360,7 @@ def fake_client():
 - [ ] **Step 8: Verify against the real daemon (read-only)**
 
 Run:
+
 ```bash
 ./.venv/bin/python -c "
 from lianli_panel.ipc import Client
@@ -366,6 +369,7 @@ print('devices:', [d['name'] for d in c.call('ListDevices')])
 print('templates:', [t['id'] for t in c.call('GetLcdTemplates')])
 "
 ```
+
 Expected: lists the two devices (`Universal Screen 8.8"`, `... LED Ring`) and at least `gaming-dash`. If this raises `DaemonDown`, stop — the daemon is not running and later tasks cannot be verified.
 
 - [ ] **Step 9: Commit**
@@ -395,10 +399,12 @@ The inspector forms in the follow-up plan need every variant's fields. `gaming-d
 **Method and its limit:** the daemon reports a missing required field as ``missing field `x` ``, so adding placeholders in a loop discovers **all required fields**. It **silently ignores unknown fields**, so optional fields cannot be discovered this way — those come from observed templates and from string literals in the binary, and are marked as non-exhaustive.
 
 **Files:**
+
 - Create: `tools/extract_schema.py`, `lianli_panel/schema.py` (generated, committed)
 - Test: `tests/test_schema.py`
 
 **Interfaces:**
+
 - Consumes: `lianli_panel.ipc.Client`.
 - Produces: `lianli_panel.schema.WIDGET_KINDS: dict[str, VariantSpec]`, `SOURCE_TYPES: dict[str, VariantSpec]`, where `VariantSpec` is a dataclass with `name: str`, `required: tuple[str, ...]`, `observed_optional: tuple[str, ...]`. Also `lianli_panel.schema.KIND_NAMES: tuple[str, ...]` and `SOURCE_NAMES: tuple[str, ...]`.
 
@@ -714,6 +720,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Generate the schema module**
 
 Run:
+
 ```bash
 ./.venv/bin/python tools/extract_schema.py > /tmp/schema.py
 echo "extractor exit: $?"
@@ -736,6 +743,7 @@ for n, s in {**schema.WIDGET_KINDS, **schema.SOURCE_TYPES}.items():
     print(f'{n:20} required={s.required}')
 "
 ```
+
 Expected: `12 14`, then a line per variant with a **non-empty** `required` tuple.
 Counting 12 and 14 proves only that the loop ran, not that extraction succeeded —
 a stalled variant is still counted. Read the tuples.
@@ -771,10 +779,12 @@ MSG
 ### Task 3: Template model with lossless round-trip
 
 **Files:**
+
 - Create: `lianli_panel/model.py`
 - Test: `tests/test_model_roundtrip.py`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `lianli_panel.model.Template` and `Widget` dataclasses. `Template.from_json(obj: dict) -> Template`, `Template.to_json() -> dict`, `Template.widget(widget_id: str) -> Widget | None`. `Widget` fields: `id: str`, `x: float`, `y: float`, `width: float`, `height: float`, `kind: dict`, `extra: dict`. `Widget.kind_type -> str` property. Module constant `BASE_W, BASE_H = 1920, 480`.
 
@@ -978,10 +988,12 @@ MSG
 This is the highest-value correctness work in the plan. `SensorRange.max` is a percentage of the widget's own span; every UI field shows real units. A mistake here renders wrong colours with no error anywhere.
 
 **Files:**
+
 - Modify: `lianli_panel/model.py` (append)
 - Test: `tests/test_model_ranges.py`
 
 **Interfaces:**
+
 - Consumes: `Template`, `Widget` from Task 3.
 - Produces, all in `lianli_panel.model`:
   - `pct_to_raw(pct: float, vmin: float, vmax: float) -> float`
@@ -1271,6 +1283,7 @@ Expected: PASS, 16 passed
 - [ ] **Step 5: Check the real template validates clean**
 
 Run:
+
 ```bash
 ./.venv/bin/python -c "
 import json
@@ -1281,6 +1294,7 @@ for p in validate(t):
 print('problems:', len(validate(t)))
 "
 ```
+
 Expected: `problems: 0`. A hand-built template that has driven the panel for days should be clean. **If anything is reported, do not "fix" the template — investigate whether the validator is wrong.** The template is known-good; the validator is new.
 
 - [ ] **Step 6: Commit**
@@ -1314,10 +1328,12 @@ MSG
 ### Task 5: Preview renderer with command substitution
 
 **Files:**
+
 - Create: `lianli_panel/render.py`
 - Test: `tests/test_render.py`
 
 **Interfaces:**
+
 - Consumes: `ipc.Client`, `model.Template`.
 - Produces, in `lianli_panel.render`:
   - `substitute_commands(tpl_json: dict, values: dict[str, float], default: float = 0.0) -> dict` — deep copy with every `{"type":"command","cmd":X}` source replaced by `{"type":"constant","value":values.get(X, default)}`
@@ -1605,6 +1621,7 @@ Expected: PASS, 15 passed
 This is the whole point of the task; assert it against the real daemon rather than trusting the unit test.
 
 Run:
+
 ```bash
 ./.venv/bin/python - <<'PY'
 import time
@@ -1642,6 +1659,7 @@ assert auto == 0, "command source executed on the automatic path"
 print("OK")
 PY
 ```
+
 Expected: `executions during 5 automatic renders: 0`, `... 5 live renders: 10`, then `OK`.
 
 The probe file is created by uid `lianli` in a sticky directory, so it cannot be deleted by this user. Leave it; note it for cleanup with `sudo rm /var/tmp/lianli-subst-probe.log`.
@@ -1676,10 +1694,12 @@ MSG
 The first draft of the spec got this wrong twice. Read the spec's "Is it actually on the screen?" section before starting.
 
 **Files:**
+
 - Create: `lianli_panel/health.py`
 - Test: `tests/test_health.py`
 
 **Interfaces:**
+
 - Consumes: nothing (subprocess only).
 - Produces, in `lianli_panel.health`: `PanelHealth` dataclass with `ok: bool`, `reason: str`, `last_open: datetime | None`, `last_disconnect: datetime | None`; `parse_journal(lines: Iterable[str]) -> PanelHealth`; `check(unit: str = "lianli-daemon-system.service") -> PanelHealth`; constant `RESTART_HINT: str`.
 
@@ -1965,10 +1985,12 @@ MSG
 ### Task 7: Transactional apply with conflict detection
 
 **Files:**
+
 - Create: `lianli_panel/apply.py`
 - Test: `tests/test_apply.py`
 
 **Interfaces:**
+
 - Consumes: `ipc.Client`, `ipc.DaemonError`.
 - Produces, in `lianli_panel.apply`: `templates_hash(templates: list[dict]) -> str`; `ConflictError(Exception)`; `ApplyFailed(Exception)`; `LCD_SERIAL = "hid:513b5a7acadc4203"`; `find_lcd(client) -> str`; `read_templates(client) -> tuple[list[dict], str]`; `apply_templates(client, templates: list[dict], live_id: str, *, base_hash: str | None = None, device_id: str | None = None, lcd_entry_fallback: dict | None = None) -> None`.
 
@@ -2232,10 +2254,12 @@ MSG
 ### Task 8: Snapshots with retention
 
 **Files:**
+
 - Create: `lianli_panel/snapshot.py`
 - Test: `tests/test_snapshot.py`
 
 **Interfaces:**
+
 - Consumes: `ipc.Client`, `apply.read_templates`.
 - Produces, in `lianli_panel.snapshot`: `SNAPSHOT_ROOT = Path("~/.local/share/lianli-panel/snapshots").expanduser()`; `take(client, root: Path | None = None, keep: int = 20) -> Path`; `load(path: Path) -> dict`; `prune(root: Path, keep: int = 20) -> list[Path]`; `latest(root: Path | None = None) -> Path | None`.
 
@@ -2444,6 +2468,7 @@ Expected: PASS, 8 passed
 - [ ] **Step 5: Take one real snapshot**
 
 Run:
+
 ```bash
 ./.venv/bin/python -c "
 from lianli_panel.ipc import Client
@@ -2455,6 +2480,7 @@ print('templates:', [t['id'] for t in d['templates']])
 print('lcds:', len(d['lcds']), '| thermal active:', d['thermal_service_active'])
 "
 ```
+
 Expected: a path under `~/.local/share/lianli-panel/snapshots/`, `templates: ['gaming-dash']`, `lcds: 1`.
 
 - [ ] **Step 6: Commit**
@@ -2481,10 +2507,12 @@ MSG
 ### Task 9: Sensor library and two-tier probe
 
 **Files:**
+
 - Create: `lianli_panel/sensors.py`
 - Test: `tests/test_sensors.py`
 
 **Interfaces:**
+
 - Consumes: `ipc.Client` only. It deliberately does **not** use `render.PreviewRenderer`: that class substitutes command sources away, which is the opposite of what a sensor probe needs. `render_authoritative` calls `RenderTemplatePreview` directly so the command really runs.
 - Produces, in `lianli_panel.sensors`:
   - `LIBRARY_PATH = Path("~/.config/lianli-panel/sensors.json").expanduser()`
@@ -2752,6 +2780,7 @@ Expected: PASS, 11 passed
 This is the point of having two tiers — demonstrate the divergence on the real daemon.
 
 Run:
+
 ```bash
 mkdir -p ~/sensor-probe-demo && printf '#!/bin/sh\necho 77\n' > ~/sensor-probe-demo/t.sh && chmod +x ~/sensor-probe-demo/t.sh
 ./.venv/bin/python - <<'PY'
@@ -2771,6 +2800,7 @@ print("authoritative render written to /tmp/sensor-probe.jpg —",
       len(jpeg), "bytes. Open it: the daemon reads 0, not 77.")
 PY
 ```
+
 Expected: the diagnostic parses `77.0` and exits 0 **but reports the `/home/` problem**, while the rendered image shows `0` — the daemon cannot traverse `/home/chase`. Open `/tmp/sensor-probe.jpg` and confirm visually. This single case is why the diagnostic tier is labelled non-authoritative.
 
 Clean up: `rm -rf ~/sensor-probe-demo /tmp/sensor-probe.jpg`
@@ -2804,10 +2834,12 @@ MSG
 ### Task 10: LED ring control and thermal poller config
 
 **Files:**
+
 - Create: `lianli_panel/ring.py`
 - Test: `tests/test_ring.py`
 
 **Interfaces:**
+
 - Consumes: `ipc.Client`.
 - Produces, in `lianli_panel.ring`:
   - `RING_PID = 0x8050`; `find_ring(client) -> str`
@@ -3115,6 +3147,7 @@ service is restarted.
 - [ ] **Step 6: Verify the poller reloads live**
 
 Run:
+
 ```bash
 systemctl --user restart lianli-thermal-rgb.service
 sudo mkdir -p /var/lib/lianli-panel && sudo chown chase:chase /var/lib/lianli-panel
@@ -3126,6 +3159,7 @@ print('wrote config')
 sleep 5
 journalctl --user -u lianli-thermal-rgb.service -n 5 --no-pager
 ```
+
 Expected: a `config loaded: {...'cool_c': 40.0...}` line **without** a service restart.
 
 Then verify the `poll_ms` special case separately, since it is the one setting
@@ -3139,6 +3173,7 @@ c = load_thermal(); c.poll_ms = 3000; save_thermal(c); print('poll_ms -> 3000')
 sleep 6
 journalctl --user -u lianli-thermal-rgb.service -n 5 --no-pager
 ```
+
 Expected: a `poll_ms 2000 -> 3000; restarting nvidia-smi` line. If that does not
 appear, the reload is on the wrong loop.
 
@@ -3182,11 +3217,13 @@ MSG
 Makes the core usable and independently valuable before any GUI exists — a correct replacement for `apply.sh` and `rgb.sh`.
 
 **Files:**
+
 - Create: `lianli_panel/cli.py`
 - Modify: `pyproject.toml` (add `[project.scripts]`)
 - Test: `tests/test_cli.py`
 
 **Interfaces:**
+
 - Consumes: every module above.
 - Produces: `lianli_panel.cli.main(argv: list[str] | None = None) -> int`. Subcommands: `status`, `list`, `validate <file|id>`, `apply <id>`, `preview <id> [-o PATH] [--live]`, `sensor-test <cmd>`, `ring {off|static R G B}`, `snapshot`, `revert`.
 
@@ -3465,12 +3502,14 @@ Expected: PASS, 3 passed
 - [ ] **Step 6: Exercise the read-only subcommands against the real daemon**
 
 Run:
+
 ```bash
 ./.venv/bin/python -m lianli_panel.cli status
 ./.venv/bin/python -m lianli_panel.cli list
 ./.venv/bin/python -m lianli_panel.cli validate gaming-dash
 ./.venv/bin/python -m lianli_panel.cli preview gaming-dash -o /tmp/dash.jpg
 ```
+
 Expected: `PANEL OK`, `gaming-dash` marked live with 31 widgets, `0 problem(s)`, and a JPEG written. **Open `/tmp/dash.jpg` and look at it** — it should resemble the physical panel, except that command-driven values (FPS, VRAM, RAM) read 0 because they were substituted. That difference is the substitution working, not a bug.
 
 Do not run `apply` or `ring` here; Task 12 covers hardware changes.
@@ -3504,6 +3543,7 @@ This task changes the physical panel, and it is the only one whose completion cr
 It is **not** the only task that writes to hardware: Task 10 restarts the thermal poller and changes its thresholds, and that poller drives the LED ring via `SetRgbEffect`. Everything else before this point is confined to previews, `FakeClient`, and read-only calls.
 
 **Files:**
+
 - Create: `docs/install.md`, `tools/migrate_assets.sh`
 - Modify: none in `lianli_panel/`
 
@@ -3564,6 +3604,7 @@ Wait for confirmation that it ran before continuing.
 - [ ] **Step 3: Verify both directories are readable by the daemon's uid**
 
 Run:
+
 ```bash
 sudo -u lianli test -r /usr/local/share/lianli-panel/fps.sh && echo "SHIP readable by lianli" || echo "SHIP NOT readable"
 sudo -u lianli test -x /var/lib/lianli-panel && echo "USER_DIR traversable by lianli" || echo "USER_DIR NOT traversable"
@@ -3574,6 +3615,7 @@ If `sudo -u lianli` is unavailable, use the authoritative sensor probe instead �
 ```bash
 ./.venv/bin/python -m lianli_panel.cli sensor-test /usr/local/share/lianli-panel/vram_gb.sh -o /tmp/reachable.jpg
 ```
+
 Open `/tmp/reachable.jpg`: a non-zero number means the daemon can read the new location.
 
 - [ ] **Step 4: Snapshot before touching the panel**
@@ -3584,10 +3626,12 @@ Expected: a path is printed. **Do not proceed without this** — Step 5 is the f
 - [ ] **Step 5: Apply the existing template through the new code path**
 
 Run:
+
 ```bash
 ./.venv/bin/python -m lianli_panel.cli status
 ./.venv/bin/python -m lianli_panel.cli apply gaming-dash
 ```
+
 Expected: `applied gaming-dash` then `panel OK: ...`.
 
 - [ ] **Step 6: LOOK AT THE PHYSICAL SCREEN**
@@ -3595,6 +3639,7 @@ Expected: `applied gaming-dash` then `panel OK: ...`.
 This is the completion criterion for the whole plan. Tests passing is not evidence the app works.
 
 Confirm on the panel itself:
+
 - The dash is rendering, not the Lian Li firmware splash.
 - GPU and CPU temperature rings show plausible live values.
 - The clock is ticking (proving the render loop is live, not a frozen frame).
@@ -3610,15 +3655,18 @@ Then confirm the journal shows a real open, not just a prepare:
 ```bash
 journalctl -u lianli-daemon-system.service -n 30 --no-pager -o short-iso | grep -E 'lcd::core|Prepared'
 ```
+
 `Prepared custom template` alone proves nothing — the LCD open line is the evidence.
 
 - [ ] **Step 7: Verify revert works**
 
 Run:
+
 ```bash
 ./.venv/bin/python -m lianli_panel.cli revert
 ./.venv/bin/python -m lianli_panel.cli status
 ```
+
 Expected: the snapshot is restored and the panel still renders. Look at the screen again.
 
 - [ ] **Step 8: Write `docs/install.md`**
