@@ -89,3 +89,136 @@ class Template:
 
     def widget(self, widget_id: str) -> Widget | None:
         return next((w for w in self.widgets if w.id == widget_id), None)
+
+
+# --- range conversion ------------------------------------------------------
+#
+# CONFIRMED BY DISASSEMBLY of the installed daemon:
+#   unit = clamp((value - value_min) / (value_max - value_min), 0, 1)
+#   percentage = unit * 100
+# and range selection picks the FIRST range whose `max >= percentage`, with a
+# null `max` acting as the fallback. So a range `max` is a percentage of the
+# widget's own span, NEVER a raw sensor reading. A "60" on a 20..100 gauge
+# means 68 degrees. Getting this wrong renders plausible, wrong colours with no
+# error anywhere, which is why every UI field is in real units and converts here.
+
+
+def raw_to_pct(raw: float, vmin: float, vmax: float) -> float:
+    span = vmax - vmin
+    if span == 0:
+        return 0.0
+    unit = (raw - vmin) / span
+    return max(0.0, min(1.0, unit)) * 100.0
+
+
+def pct_to_raw(pct: float, vmin: float, vmax: float) -> float:
+    span = vmax - vmin
+    if span == 0:
+        return vmin
+    return vmin + (pct / 100.0) * span
+
+
+def widget_span(w: Widget) -> tuple[float, float] | None:
+    lo, hi = w.kind.get("value_min"), w.kind.get("value_max")
+    if isinstance(lo, (int, float)) and isinstance(hi, (int, float)):
+        return float(lo), float(hi)
+    return None
+
+
+def _ranges(w: Widget) -> list[dict]:
+    r = w.kind.get("ranges")
+    return r if isinstance(r, list) else []
+
+
+def range_thresholds_raw(w: Widget) -> list[float | None]:
+    """Thresholds in real units. None marks the catch-all range."""
+    span = widget_span(w)
+    if span is None:
+        return []
+    lo, hi = span
+    out: list[float | None] = []
+    for entry in _ranges(w):
+        m = entry.get("max")
+        out.append(None if m is None else pct_to_raw(float(m), lo, hi))
+    return out
+
+
+def set_range_threshold_raw(w: Widget, index: int, raw: float | None) -> None:
+    """Write one threshold back as a percentage.
+
+    Only the named index is touched. Re-encoding untouched ranges would drift
+    their stored floats on every save and break lossless round-tripping.
+    """
+    span = widget_span(w)
+    if span is None:
+        raise ValueError(f"widget {w.id!r} has no value_min/value_max span")
+    lo, hi = span
+    entries = _ranges(w)
+    if not 0 <= index < len(entries):
+        raise IndexError(f"widget {w.id!r} has no range at index {index}")
+    entries[index]["max"] = None if raw is None else raw_to_pct(raw, lo, hi)
+
+
+# --- validation ------------------------------------------------------------
+
+
+@dataclass
+class Problem:
+    level: str  # "error" | "warning"
+    widget_id: str
+    message: str
+
+
+def validate(t: Template) -> list[Problem]:
+    problems: list[Problem] = []
+
+    seen: set[str] = set()
+    for w in t.widgets:
+        if w.id in seen:
+            problems.append(Problem("error", w.id, f"duplicate widget id {w.id!r}"))
+        seen.add(w.id)
+
+    for w in t.widgets:
+        span = widget_span(w)
+        if span is not None and span[0] > span[1]:
+            problems.append(Problem(
+                "error", w.id,
+                f"value_min ({span[0]}) is greater than value_max ({span[1]})"))
+
+        entries = _ranges(w)
+        if not entries:
+            continue
+
+        maxima = [e.get("max") for e in entries]
+        nulls = [i for i, m in enumerate(maxima) if m is None]
+
+        if len(nulls) > 1:
+            problems.append(Problem(
+                "error", w.id,
+                f"{len(nulls)} catch-all ranges (max: null); only the first is reachable"))
+        elif not nulls:
+            problems.append(Problem(
+                "warning", w.id,
+                "no catch-all range (max: null); values above the last threshold "
+                "have no colour"))
+        elif nulls[0] != len(maxima) - 1:
+            problems.append(Problem(
+                "error", w.id,
+                f"catch-all range at index {nulls[0]} makes the "
+                f"{len(maxima) - nulls[0] - 1} range(s) after it unreachable"))
+
+        numeric = [m for m in maxima if m is not None]
+        for m in numeric:
+            if not 0.0 <= float(m) <= 100.0:
+                problems.append(Problem(
+                    "error", w.id,
+                    f"range max {m} is outside 0..100 — it is a percentage of the "
+                    f"widget's own span, not a raw reading"))
+                break
+        if numeric != sorted(numeric):
+            problems.append(Problem(
+                "error", w.id,
+                "range maxima are not in ascending order; the first match wins, "
+                "so later ranges are unreachable"))
+
+    return problems
