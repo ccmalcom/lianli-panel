@@ -61,28 +61,6 @@ def _stored(client, template_id: str) -> dict:
     raise SystemExit(f"no stored template with id {template_id!r}")
 
 
-def _lcd_fallback() -> dict | None:
-    """Newest snapshotted config.lcds entry, for rebuilding a wiped array.
-
-    Walks snapshots newest-first because the most recent one may itself have
-    been taken while the array was empty. Returns None if no snapshot has ever
-    recorded an entry, in which case apply_templates raises rather than
-    inventing an orientation and serial.
-    """
-    root = snapshot.SNAPSHOT_ROOT
-    if not root.exists():
-        return None
-    for d in sorted((p for p in root.iterdir() if p.is_dir()),
-                    key=lambda p: p.name, reverse=True):
-        try:
-            entries = snapshot.load(d).get("lcds") or []
-        except (OSError, ValueError):
-            continue
-        if entries:
-            return entries[0]
-    return None
-
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     client = Client()
@@ -124,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
             # since the one just taken reflects the wiped state too.
             apply_mod.apply_templates(
                 client, templates, args.template_id, base_hash=digest,
-                lcd_entry_fallback=_lcd_fallback())
+                lcd_entry_fallback=apply_mod.lcd_entry_fallback())
             h = health.check()
             print(f"applied {args.template_id}")
             print(("panel OK: " if h.ok else "WARNING: ") + h.reason)

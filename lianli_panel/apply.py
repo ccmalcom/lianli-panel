@@ -37,6 +37,29 @@ class ApplyFailed(Exception):
     """The apply did not complete; the panel was left unchanged."""
 
 
+def lcd_entry_fallback(root=None) -> dict | None:
+    """Newest snapshotted config.lcds entry, for rebuilding a wiped array.
+
+    Walks snapshots newest-first because the most recent one may itself have
+    been taken while the array was empty -- lianli-gui wipes it on every config
+    write. Returns None if no snapshot ever recorded an entry, in which case
+    apply_templates raises rather than inventing an orientation and serial.
+    """
+    from . import snapshot
+    root = root or snapshot.SNAPSHOT_ROOT
+    if not root.exists():
+        return None
+    for d in sorted((p for p in root.iterdir() if p.is_dir()),
+                    key=lambda p: p.name, reverse=True):
+        try:
+            entries = snapshot.load(d).get("lcds") or []
+        except (OSError, ValueError):
+            continue
+        if entries:
+            return entries[0]
+    return None
+
+
 def templates_hash(templates: list[dict]) -> str:
     """Order-sensitive digest. Widget and template order are both meaningful."""
     blob = json.dumps(templates, sort_keys=True, separators=(",", ":"))

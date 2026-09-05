@@ -137,3 +137,40 @@ def test_widget_list_reorder_changes_draw_order(qapp, win):
     order_before = [w.id for w in win.draft.current().widgets]
     win.widget_list.reordered.emit(order_before[0], +1)
     assert [w.id for w in win.draft.current().widgets] == list(reversed(order_before))
+
+
+def test_apply_snapshots_then_sends_templates_then_media(qapp, win, monkeypatch, tmp_path):
+    """SetLcdTemplates alone does not update the panel -- it replaces the
+    stored template while the live renderer keeps what it last prepared. The
+    order below is the whole point of routing through apply_templates."""
+    from lianli_panel.gui import window as win_mod
+    monkeypatch.setattr(win_mod.snapshot, "take", lambda c, **k: tmp_path / "snap")
+    monkeypatch.setattr(win_mod.apply_mod, "lcd_entry_fallback", lambda: CONFIG["lcds"][0])
+    win.apply_now()
+    methods = win.client.methods()
+    assert methods.index("SetLcdTemplates") < methods.index("SetLcdMedia")
+    sent = [c for c in win.client.calls if c[0] == "SetLcdTemplates"][0][1]
+    assert [t["id"] for t in sent["templates"]] == ["gaming-dash", "spare"]
+
+
+def test_apply_sends_the_whole_library_after_deleting_one(qapp, win, monkeypatch, tmp_path):
+    from lianli_panel.gui import window as win_mod
+    monkeypatch.setattr(win_mod.snapshot, "take", lambda c, **k: tmp_path / "snap")
+    monkeypatch.setattr(win_mod.apply_mod, "lcd_entry_fallback", lambda: CONFIG["lcds"][0])
+    win.draft.delete_template("spare")
+    win.apply_now()
+    sent = [c for c in win.client.calls if c[0] == "SetLcdTemplates"][0][1]
+    assert [t["id"] for t in sent["templates"]] == ["gaming-dash"]
+
+
+def test_a_conflicting_apply_writes_nothing_when_declined(qapp, win, monkeypatch, tmp_path):
+    """Another process wrote to the set while this draft was open. A whole-set
+    write would silently discard their change."""
+    from PySide6.QtWidgets import QMessageBox
+    from lianli_panel.gui import window as win_mod
+    monkeypatch.setattr(win_mod.snapshot, "take", lambda c, **k: tmp_path / "snap")
+    monkeypatch.setattr(QMessageBox, "question",
+                        staticmethod(lambda *a, **k: QMessageBox.No))
+    win.draft.base_hash = "0" * 64
+    win.apply_now()
+    assert "SetLcdTemplates" not in win.client.methods()
