@@ -123,3 +123,51 @@ def test_read_templates_returns_the_set_and_its_hash(fake_client):
     fake_client.responses["GetLcdTemplates"] = [A]
     templates, digest = read_templates(fake_client)
     assert templates == [A] and digest == templates_hash([A])
+
+
+from lianli_panel.apply import live_template_id
+
+
+def test_live_template_comes_from_the_entry_matching_the_serial():
+    config = {"lcds": [
+        {"serial": "hid:other", "template_id": "someone-elses"},
+        {"serial": "hid:513b5a7acadc4203", "template_id": "gaming-dash"},
+    ]}
+    assert live_template_id(config, "hid:513b5a7acadc4203") == "gaming-dash"
+
+
+def test_live_template_is_not_simply_the_first_entry():
+    """The defect this function exists to fix: lcds[0] can belong to another
+    device entirely."""
+    config = {"lcds": [
+        {"serial": "hid:other", "template_id": "someone-elses"},
+        {"serial": "hid:513b5a7acadc4203", "template_id": "gaming-dash"},
+    ]}
+    assert live_template_id(config, "hid:513b5a7acadc4203") != "someone-elses"
+
+
+def test_duplicate_entries_resolve_to_the_first_like_the_daemon_does():
+    """AppConfig::load collapses duplicate serials keeping the FIRST. Reading
+    the second would report a template the panel is not rendering."""
+    config = {"lcds": [
+        {"serial": "hid:513b5a7acadc4203", "template_id": "stale"},
+        {"serial": "hid:513b5a7acadc4203", "template_id": "just-applied"},
+    ]}
+    assert live_template_id(config, "hid:513b5a7acadc4203") == "stale"
+
+
+def test_no_entry_for_this_panel_is_none_not_a_guess():
+    """lianli-gui wipes the array. Returning lcds[0] here would report another
+    device's template as this panel's."""
+    config = {"lcds": [{"serial": "hid:other", "template_id": "someone-elses"}]}
+    assert live_template_id(config, "hid:513b5a7acadc4203") is None
+
+
+def test_an_empty_or_missing_lcds_array_is_none():
+    assert live_template_id({"lcds": []}, "hid:513b5a7acadc4203") is None
+    assert live_template_id({}, "hid:513b5a7acadc4203") is None
+
+
+def test_an_entry_with_no_template_id_is_none_not_a_keyerror():
+    config = {"lcds": [{"serial": "hid:513b5a7acadc4203", "type": "sensor"}]}
+    assert live_template_id(config, "hid:513b5a7acadc4203") is None

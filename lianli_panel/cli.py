@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "list":
             templates, digest = apply_mod.read_templates(client)
             config = client.call("GetConfig") or {}
-            live = next((e.get("template_id") for e in config.get("lcds") or []), None)
+            live = apply_mod.live_template_id(config, apply_mod.LCD_SERIAL)
             for t in templates:
                 mark = "*" if t.get("id") == live else " "
                 print(f"{mark} {t.get('id'):<20} {len(t.get('widgets', []))} widgets")

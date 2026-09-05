@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
                        f"and nothing can be applied.")
             return
         self.banner.clear("daemon")
-        live = next((e.get("template_id") for e in config.get("lcds") or []), None)
+        live = apply_mod.live_template_id(config, apply_mod.LCD_SERIAL)
         self.draft = Draft(templates, live)
         self._refresh_lists()
 

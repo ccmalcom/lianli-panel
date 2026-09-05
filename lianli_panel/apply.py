@@ -105,6 +105,30 @@ def entry_key(entry: dict) -> str:
     return "unknown"
 
 
+def live_template_id(config: dict, serial: str) -> str | None:
+    """The template_id of the entry for THIS panel.
+
+    NOT lcds[0]. The array can hold entries for other LCDs, and this daemon has
+    been observed carrying two entries for the SAME serial for a day at a time
+    (hazard 4 above). Reading the first entry is right only when there is
+    exactly one LCD and no duplicate -- and the duplicate case is precisely the
+    one where a wrong answer matters.
+
+    When the serial appears more than once, the FIRST match wins, because that
+    is what AppConfig::load does when it collapses duplicates. Mirroring the
+    daemon's own rule is the point: this must report what the panel renders,
+    not what the config wishes it rendered.
+
+    Returns None when no entry matches -- which is the lianli-gui-wiped case,
+    and is reported as "no entry for this panel" rather than papered over with
+    another device's template.
+    """
+    for entry in config.get("lcds") or []:
+        if entry.get("serial") == serial:
+            return entry.get("template_id")
+    return None
+
+
 def _lcd_entry(client, device_id: str, fallback: dict | None) -> dict:
     config = client.call("GetConfig") or {}
     for entry in config.get("lcds") or []:
