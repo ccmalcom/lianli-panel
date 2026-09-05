@@ -17,7 +17,9 @@ from ..apply import read_templates
 from ..ipc import DaemonError
 from .canvas import Canvas
 from .draft import Draft
+from .inspector import Inspector
 from .preview import PreviewWorker
+from .sidebar import WidgetList
 
 TITLE = "lianli-panel"
 
@@ -46,9 +48,29 @@ class MainWindow(QMainWindow):
         self.canvas.geometry_changed.connect(self._move_widget)
         self.canvas.edit_finished.connect(self.rerender)
 
+        self.inspector = Inspector()
+        self.inspector.changed.connect(self._field_edited)
+        self.inspector.structure_changed.connect(self._structure_edited)
+
+        self.widget_list = WidgetList()
+        self.widget_list.selected.connect(self._select_from_list)
+        self.widget_list.reordered.connect(self._reorder)
+        self.widget_list.deleted.connect(self._delete_widget)
+        self.widget_list.duplicated.connect(self._duplicate_widget)
+
+        left = QVBoxLayout()
+        left.addWidget(self.template_list)
+        left.addWidget(self.widget_list, 1)
+        left_holder = QWidget()
+        left_holder.setLayout(left)
+        left_holder.setMaximumWidth(300)
+
+        self.inspector.setMaximumWidth(360)
+
         body = QHBoxLayout()
-        body.addWidget(self.template_list)
+        body.addWidget(left_holder)
         body.addWidget(self.canvas, 1)
+        body.addWidget(self.inspector)
 
         root = QVBoxLayout()
         root.addWidget(self.banner)
@@ -82,8 +104,7 @@ class MainWindow(QMainWindow):
         if self.draft.current_id:
             self.template_list.setCurrentRow(
                 [t.id for t in self.draft.templates].index(self.draft.current_id))
-        self.canvas.set_widgets(self.draft.rects())
-        self.rerender()
+        self._refresh_lists()
 
     def rerender(self) -> None:
         current = self.draft.current()
@@ -96,8 +117,7 @@ class MainWindow(QMainWindow):
         if template_id and template_id != self.draft.current_id:
             self.draft.current_id = template_id
             self.draft.selection = None
-            self.canvas.set_widgets(self.draft.rects())
-            self.rerender()
+            self._refresh_lists()
 
     def set_frame(self, jpeg: bytes) -> None:
         self.frame_bytes = jpeg
@@ -105,6 +125,38 @@ class MainWindow(QMainWindow):
 
     def _select(self, widget_id: str) -> None:
         self.draft.selection = widget_id or None
+        self.inspector.set_widget(self.draft.widget(widget_id) if widget_id else None)
+
+    def _select_from_list(self, widget_id: str) -> None:
+        self.canvas.set_selection(widget_id or None)
+        self._select(widget_id)
+
+    def _field_edited(self) -> None:
+        self.draft.dirty = True
+        self.rerender()
+
+    def _structure_edited(self) -> None:
+        self.draft.dirty = True
+        self.inspector.set_widget(self.draft.widget(self.draft.selection or ""))
+        self.rerender()
+
+    def _reorder(self, widget_id: str, delta: int) -> None:
+        self.draft.reorder_widget(widget_id, delta)
+        self._refresh_lists()
+
+    def _delete_widget(self, widget_id: str) -> None:
+        self.draft.delete_widget(widget_id)
+        self.inspector.set_widget(None)
+        self._refresh_lists()
+
+    def _duplicate_widget(self, widget_id: str) -> None:
+        self.draft.duplicate_widget(widget_id)
+        self._refresh_lists()
+
+    def _refresh_lists(self) -> None:
+        self.widget_list.set_draft(self.draft)
+        self.canvas.set_widgets(self.draft.rects())
+        self.rerender()
 
     def _begin_edit(self) -> None:
         """One checkpoint per drag, taken on press. Without this a single drag

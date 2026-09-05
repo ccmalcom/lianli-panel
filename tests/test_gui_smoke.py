@@ -104,3 +104,36 @@ def test_canvas_drag_updates_the_draft_in_centre_origin(qapp, win):
     assert w.x == 150.0                 # centre moved by the drag delta
     assert w.width == 80.0              # size untouched by a move
     assert win.draft.dirty is True
+
+
+def test_inspector_populates_for_the_selected_widget(qapp, win):
+    win.canvas.resize(1920, 480)
+    win.canvas.press_model(100.0, 100.0)
+    win.canvas.release_model()
+    assert "font_size" in win.inspector.editors
+    assert win.inspector.kind_combo.currentText() == "value_text"
+
+
+def test_editing_a_field_marks_the_draft_dirty(qapp, win):
+    win.canvas.press_model(100.0, 100.0)
+    win.canvas.release_model()
+    win.inspector.editors["font_size"].setValue(48.0)
+    assert win.draft.widget("cpu").kind["font_size"] == 48.0
+    assert win.draft.dirty is True
+
+
+def test_range_row_shows_real_units_not_percentages(qapp, win):
+    """The stored 60.0 is a percentage of the widget's own 0..100 span, which
+    happens to be 60 here. On a 20..100 gauge the same 60 would show as 68."""
+    win.canvas.press_model(100.0, 100.0)
+    win.canvas.release_model()
+    assert win.inspector.ranges.item(0, 0).text().startswith("60")
+    assert win.inspector.ranges.item(1, 0).text() == "—"
+
+
+def test_widget_list_reorder_changes_draw_order(qapp, win):
+    win.draft.duplicate_widget("cpu")
+    win.widget_list.set_draft(win.draft)
+    order_before = [w.id for w in win.draft.current().widgets]
+    win.widget_list.reordered.emit(order_before[0], +1)
+    assert [w.id for w in win.draft.current().widgets] == list(reversed(order_before))
