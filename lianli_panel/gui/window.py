@@ -10,13 +10,12 @@ and an empty draft, never a traceback at startup.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QListWidget, QMainWindow,
                                QVBoxLayout, QWidget)
 
 from ..apply import read_templates
 from ..ipc import DaemonError
+from .canvas import Canvas
 from .draft import Draft
 from .preview import PreviewWorker
 
@@ -41,9 +40,11 @@ class MainWindow(QMainWindow):
         self.template_list.setMaximumWidth(240)
         self.template_list.currentTextChanged.connect(self._choose_template)
 
-        self.canvas = QLabel("no frame yet")
-        self.canvas.setMinimumSize(960, 240)
-        self.canvas.setStyleSheet("background:#000;")
+        self.canvas = Canvas()
+        self.canvas.selection_changed.connect(self._select)
+        self.canvas.edit_started.connect(self._begin_edit)
+        self.canvas.geometry_changed.connect(self._move_widget)
+        self.canvas.edit_finished.connect(self.rerender)
 
         body = QHBoxLayout()
         body.addWidget(self.template_list)
@@ -81,6 +82,7 @@ class MainWindow(QMainWindow):
         if self.draft.current_id:
             self.template_list.setCurrentRow(
                 [t.id for t in self.draft.templates].index(self.draft.current_id))
+        self.canvas.set_widgets(self.draft.rects())
         self.rerender()
 
     def rerender(self) -> None:
@@ -94,15 +96,26 @@ class MainWindow(QMainWindow):
         if template_id and template_id != self.draft.current_id:
             self.draft.current_id = template_id
             self.draft.selection = None
+            self.canvas.set_widgets(self.draft.rects())
             self.rerender()
 
     def set_frame(self, jpeg: bytes) -> None:
         self.frame_bytes = jpeg
-        image = QImage.fromData(jpeg, "JPEG")
-        if not image.isNull():
-            self.canvas.setPixmap(QPixmap.fromImage(image).scaled(
-                self.canvas.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation))
+        self.canvas.set_frame(jpeg)
+
+    def _select(self, widget_id: str) -> None:
+        self.draft.selection = widget_id or None
+
+    def _begin_edit(self) -> None:
+        """One checkpoint per drag, taken on press. Without this a single drag
+        leaves ~40 undo entries and ctrl-Z stops being usable."""
+        self.draft.checkpoint()
+
+    def _move_widget(self, wid: str, x: float, y: float,
+                     w: float, h: float) -> None:
+        self.draft.set_geometry(wid, x, y, w, h, checkpoint=False)
+        self.canvas.set_widgets(self.draft.rects())
+        self.rerender()
 
     def _render_failed(self, message: str) -> None:
         self._warn(f"preview render failed: {message}")

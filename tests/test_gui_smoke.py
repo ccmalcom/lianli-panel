@@ -84,3 +84,23 @@ def test_window_survives_a_dead_daemon(qapp):
     assert w.draft.templates == []
     assert "daemon" in w.banner.text().lower()
     w.close()
+
+
+def test_canvas_press_selects_a_widget(qapp, win):
+    """The canvas is 1920x480 in model space; press in the middle of the only
+    widget, which is centred at (100, 100)."""
+    win.canvas.resize(1920, 480)
+    win.canvas.press_model(100.0, 100.0)
+    win.canvas.release_model()
+    assert win.draft.selection == "cpu"
+
+
+def test_canvas_drag_updates_the_draft_in_centre_origin(qapp, win):
+    win.canvas.resize(1920, 480)
+    win.canvas.press_model(100.0, 100.0)
+    win.canvas.move_model(150.0, 100.0)
+    win.canvas.release_model()
+    w = win.draft.widget("cpu")
+    assert w.x == 150.0                 # centre moved by the drag delta
+    assert w.width == 80.0              # size untouched by a move
+    assert win.draft.dirty is True
