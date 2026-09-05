@@ -10,9 +10,10 @@ and an empty draft, never a traceback at startup.
 """
 from __future__ import annotations
 
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QMessageBox,
-                               QToolBar, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow,
+                               QMessageBox, QToolBar, QVBoxLayout, QWidget)
 
+from .. import health
 from .. import apply as apply_mod
 from .. import snapshot
 from ..apply import read_templates
@@ -23,23 +24,20 @@ from .draft import Draft
 from .inspector import Inspector
 from .preview import PreviewWorker
 from .sidebar import TemplateList, WidgetList
+from .status import BannerStack, HealthPoller
 
 TITLE = "lianli-panel"
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, client) -> None:
+    def __init__(self, client, *, health_poller=None) -> None:
         super().__init__()
         self.client = client
         self.setWindowTitle(TITLE)
         self.resize(1500, 700)
         self.frame_bytes: bytes | None = None
 
-        self.banner = QLabel("")
-        self.banner.setWordWrap(True)
-        self.banner.setStyleSheet(
-            "background:#5a1d1d; color:#ffd9d9; padding:6px;")
-        self.banner.hide()
+        self.banner = BannerStack()
 
         self.template_list = TemplateList()
         self.template_list.chosen.connect(self._choose_template)
@@ -90,10 +88,17 @@ class MainWindow(QMainWindow):
         self.worker.rendered.connect(self.set_frame)
         self.worker.failed.connect(self._render_failed)
 
+        # Injectable so tests do not shell out to journalctl. The connection is
+        # made BEFORE the first poll or the first report is lost.
+        self.health = health_poller or HealthPoller(parent=self)
+        self.health.reported.connect(self._health_reported)
+        self.health.poll()
+
         bar = QToolBar()
         bar.addAction("Apply", self.apply_now)
         bar.addAction("Revert", self.revert)
         bar.addAction("Refresh (runs sensors)", self.refresh_live)
+        bar.addAction("Re-check panel", self.health.poll)
         bar.addAction("Undo", lambda: (self.draft.undo(), self._refresh_lists()))
         bar.addAction("Redo", lambda: (self.draft.redo(), self._refresh_lists()))
         self.addToolBar(bar)
@@ -112,6 +117,7 @@ class MainWindow(QMainWindow):
             self._warn(f"the daemon did not answer: {exc}. Nothing is loaded "
                        f"and nothing can be applied.")
             return
+        self.banner.clear("daemon")
         live = next((e.get("template_id") for e in config.get("lcds") or []), None)
         self.draft = Draft(templates, live)
         self._refresh_lists()
@@ -193,6 +199,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Apply failed", str(exc))
             return
         self.draft.mark_applied(self.draft.payload())
+        self.health.poll()
         self.statusBar().showMessage(
             f"applied · live: {self.draft.live_id}"
             + (f" · snapshot {snap.name}" if snap else ""), 10000)
@@ -232,6 +239,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("a render is already in flight", 3000)
 
     def set_frame(self, jpeg: bytes) -> None:
+        self.banner.clear("render")
         self.frame_bytes = jpeg
         self.canvas.set_frame(jpeg)
 
@@ -283,11 +291,53 @@ class MainWindow(QMainWindow):
         self.rerender()
 
     def _render_failed(self, message: str) -> None:
-        self._warn(f"preview render failed: {message}")
+        self._warn(f"preview render failed: {message}", key="render")
 
-    def _warn(self, message: str) -> None:
-        self.banner.setText(message)
-        self.banner.show()
+    def _warn(self, message: str, key: str = "daemon") -> None:
+        self.banner.show_banner(key, message)
+
+    # --- health and interlock ----------------------------------------------
+
+    def _health_reported(self, report, vendor_pids) -> None:
+        if report.ok:
+            self.banner.clear("health")
+        else:
+            self.banner.show_banner(
+                "health",
+                f"{report.reason}\n\nThis is a heuristic read of the journal, "
+                "not a read of the device — it can be wrong in both directions.",
+                "error",
+                action=("Copy the fix", self._copy_restart_hint))
+        if vendor_pids:
+            pids = ", ".join(str(p) for p in vendor_pids)
+            self.banner.show_banner(
+                "vendor-gui", f"{health.VENDOR_GUI_WARNING} (pid {pids})",
+                "warn", action=("Re-check config.lcds", self.verify_lcd_entry))
+        else:
+            self.banner.clear("vendor-gui")
+
+    def _copy_restart_hint(self) -> None:
+        QApplication.clipboard().setText(
+            health.RESTART_HINT.split("#")[0].strip())
+        self.statusBar().showMessage(
+            "restart command copied to the clipboard", 8000)
+
+    def verify_lcd_entry(self) -> None:
+        """READ-ONLY. Applying is what repairs the entry; this only says
+        whether it needs repairing, so pressing it while lianli-gui is still
+        open cannot make anything worse."""
+        try:
+            config = self.client.call("GetConfig") or {}
+        except DaemonError as exc:
+            self._warn(f"could not read the config: {exc}", key="config")
+            return
+        problem = health.config_lcds_problem(config, apply_mod.LCD_SERIAL)
+        if problem is None:
+            self.banner.clear("config")
+            self.statusBar().showMessage(
+                "config.lcds still carries this panel's entry", 8000)
+            return
+        self.banner.show_banner("config", problem, "error")
 
     def closeEvent(self, event) -> None:
         if self.isVisible() and self.draft.dirty and QMessageBox.question(
@@ -297,4 +347,5 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self.worker.stop()
+        self.health.stop()
         super().closeEvent(event)

@@ -53,10 +53,20 @@ def wait(qapp, pred, timeout=5.0):
     return pred()
 
 
+def stub_poller(report=None, pids=()):
+    """The real poller runs journalctl. Tests must not."""
+    from lianli_panel import health
+    from lianli_panel.gui.status import HealthPoller
+    report = report or health.PanelHealth(
+        True, "panel opened at 12:00:00 with no later disconnect")
+    return HealthPoller(check=lambda: report, scan=lambda: list(pids),
+                        interval_ms=0)
+
+
 @pytest.fixture
 def win(qapp):
     from lianli_panel.gui.window import MainWindow
-    w = MainWindow(make_client())
+    w = MainWindow(make_client(), health_poller=stub_poller())
     yield w
     w.close()
 
@@ -80,7 +90,8 @@ def test_window_survives_a_dead_daemon(qapp):
     crashing here would be the app's most common behaviour."""
     from lianli_panel.ipc import DaemonDown
     from lianli_panel.gui.window import MainWindow
-    w = MainWindow(make_client(GetLcdTemplates=DaemonDown("no socket")))
+    w = MainWindow(make_client(GetLcdTemplates=DaemonDown("no socket")),
+                   health_poller=stub_poller())
     assert w.draft.templates == []
     assert "daemon" in w.banner.text().lower()
     w.close()
@@ -193,3 +204,60 @@ def test_editing_value_max_marks_the_draft_dirty(qapp, win):
     assert win.draft.dirty is False
     win.inspector.editors["value_max"].setValue(120.0)
     assert win.draft.dirty is True
+
+
+def test_a_dead_panel_raises_the_health_banner(qapp):
+    """IPC returns ok into a dead handle, so this banner is the only thing
+    between 'my edit did nothing' and 'the panel has been unplugged since the
+    last replug'."""
+    from lianli_panel import health
+    from lianli_panel.gui.window import MainWindow
+    dead = health.PanelHealth(False, "the panel was disconnected at 17:59:48")
+    w = MainWindow(make_client(), health_poller=stub_poller(dead))
+    assert wait(qapp, lambda: "health" in w.banner.keys())
+    assert "disconnected" in w.banner.text()
+    assert "heuristic" in w.banner.text()
+    w.close()
+
+
+def test_a_healthy_panel_raises_no_banner(qapp, win):
+    assert wait(qapp, lambda: win.banner.keys() == [])
+
+
+def test_the_vendor_gui_gets_its_own_banner(qapp):
+    from lianli_panel import health
+    from lianli_panel.gui.window import MainWindow
+    dead = health.PanelHealth(False, "the panel was disconnected")
+    w = MainWindow(make_client(), health_poller=stub_poller(dead, pids=[4242]))
+    assert wait(qapp, lambda: sorted(w.banner.keys()) == ["health", "vendor-gui"])
+    assert "4242" in w.banner.text()
+    w.close()
+
+
+def test_verify_lcd_entry_reports_a_wiped_array(qapp, win):
+    """What lianli-gui leaves behind. GetConfig still answers, the daemon still
+    returns ok, and the panel renders nothing."""
+    win.client.responses["GetConfig"] = {"lcds": []}
+    win.verify_lcd_entry()
+    assert "config" in win.banner.keys()
+    assert "EMPTY" in win.banner.text()
+
+
+def test_a_successful_render_clears_the_render_banner(qapp, win):
+    win._render_failed("daemon went away")
+    assert "render" in win.banner.keys()
+    win.set_frame(b"\xff\xd8\xff\xd9")
+    assert "render" not in win.banner.keys()
+
+
+def test_the_vendor_gui_banner_clears_once_it_is_closed(qapp, win):
+    """The single QLabel this task replaced showed only the last message and
+    never cleared -- a resolved warning stayed on screen until restart. This
+    is the regression that invariant exists to prevent: once lianli-gui is
+    gone, the next report must take the banner down, not leave it stuck."""
+    from lianli_panel import health
+    healthy = health.PanelHealth(True, "panel opened with no later disconnect")
+    win._health_reported(healthy, [4242])
+    assert "vendor-gui" in win.banner.keys()
+    win._health_reported(healthy, [])
+    assert "vendor-gui" not in win.banner.keys()

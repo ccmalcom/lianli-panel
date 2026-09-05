@@ -26,10 +26,12 @@ the UI rather than implying certainty.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Iterable
 
 RESTART_HINT = (
@@ -133,3 +135,89 @@ def check(unit: str = "lianli-daemon-system.service") -> PanelHealth:
         return PanelHealth(False, f"journalctl exited {out.returncode}: "
                                   f"{out.stderr.strip()[:200]}")
     return parse_journal(out.stdout.splitlines())
+
+
+# The vendor GUI. It cannot represent template mode, so every config write it
+# performs drops the lcds array entirely -- see apply.py hazard 3.
+VENDOR_GUI_NAMES = ("lianli-gui",)
+
+VENDOR_GUI_WARNING = (
+    "lianli-gui is running. It cannot represent template mode, so it WIPES "
+    "config.lcds every time it writes config — after which the daemon has no "
+    "LCD entry, the panel renders nothing, and no call reports an error. This "
+    "app will not close it for you. Close it, then re-check the entry."
+)
+
+
+def vendor_gui_pids(names: Iterable[str] = VENDOR_GUI_NAMES,
+                    proc_root: str | Path = "/proc") -> list[int]:
+    """PIDs of the vendor GUI, read from /proc rather than by running pgrep.
+
+    No subprocess: this is polled on a timer, and spawning a process every
+    minute to ask a question /proc answers directly is pure waste.
+
+    Matched two ways because neither is sufficient alone. `comm` is TRUNCATED
+    TO 15 CHARACTERS by the kernel, so a longer binary name never compares
+    equal to itself; the `exe` symlink carries the full path but is unreadable
+    for processes owned by another user. Either match counts.
+
+    Every read is guarded: a process can exit between listing the directory and
+    reading its files, and a scan that raises would take the banner down with
+    it.
+    """
+    wanted = set(names)
+    truncated = {n[:15] for n in wanted}
+    root = Path(proc_root)
+    try:
+        entries = sorted(root.iterdir(), key=lambda p: p.name)
+    except OSError:
+        return []
+
+    found: list[int] = []
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            comm = (entry / "comm").read_text().strip()
+        except OSError:
+            comm = ""
+        if comm and comm in truncated:
+            found.append(int(entry.name))
+            continue
+        try:
+            exe = os.path.basename(os.readlink(entry / "exe"))
+        except OSError:
+            continue
+        if exe in wanted:
+            found.append(int(entry.name))
+    return found
+
+
+def config_lcds_problem(config: dict, serial: str) -> str | None:
+    """Whether config.lcds still carries a usable entry for this panel.
+
+    None means fine; anything else is a sentence naming what is wrong. This is
+    the state lianli-gui destroys, and nothing else reports it: IPC calls keep
+    returning ok against a config that can no longer render anything.
+    """
+    entries = config.get("lcds") or []
+    if not entries:
+        return ("config.lcds is EMPTY — this is what lianli-gui does on every "
+                "config write. The daemon has no LCD entry to render to. "
+                "Applying from this app restores the entry from the newest "
+                "snapshot; if no snapshot ever recorded one, the apply will "
+                "refuse rather than guess an orientation and serial.")
+    entry = next((e for e in entries if e.get("serial") == serial), None)
+    if entry is None:
+        return (f"config.lcds has {len(entries)} entr"
+                f"{'y' if len(entries) == 1 else 'ies'} but none for {serial}. "
+                "The panel this app edits is not the one the daemon is "
+                "configured to draw on.")
+    if entry.get("type") != "custom":
+        return (f"the LCD entry is in {entry.get('type')!r} mode, not 'custom', "
+                "so templates are ignored entirely. Applying from this app "
+                "switches it back.")
+    if not entry.get("template_id"):
+        return ("the LCD entry names no template_id, so the panel renders "
+                "nothing. Applying from this app re-points it.")
+    return None
