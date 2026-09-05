@@ -1,16 +1,12 @@
 import json
 from pathlib import Path
 
-import pytest
-
 from lianli_panel.model import Template, Widget
 
-REAL = Path("/var/tmp/lianli-stats/gaming-dash.json")
+REAL = Path(__file__).parent / "fixtures" / "gaming-dash.json"
 
 
 def test_roundtrip_preserves_real_template_exactly():
-    if not REAL.exists():
-        pytest.skip("gaming-dash.json not present")
     original = json.loads(REAL.read_text())
     assert Template.from_json(original).to_json() == original
 
