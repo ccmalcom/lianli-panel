@@ -31,6 +31,9 @@ def _dark(app: QApplication) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     app = QApplication(argv if argv is not None else sys.argv)
+    app.setApplicationName("lianli-panel")
+    app.setApplicationDisplayName("Lian Li Panel Editor")
+    app.setDesktopFileName("lianli-panel")     # matches lianli-panel.desktop
     _dark(app)
     window = MainWindow(Client())
     window.show()

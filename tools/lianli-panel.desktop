@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Lian Li Panel Editor
+GenericName=LCD template editor
+Comment=Edit the Universal Screen 8.8" template library and apply it to the panel
+Exec=/home/chase/Documents/Code/lianli-panel/.venv/bin/lianli-panel-gui
+Icon=video-display
+Terminal=false
+Categories=Utility;Settings;HardwareSettings;
+Keywords=lianli;lcd;panel;rgb;
+StartupNotify=true
+StartupWMClass=lianli-panel

@@ -6,6 +6,16 @@ requires-python = ">=3.13"
 [project.scripts]
 lianli-panel = "lianli_panel.cli:main"
 
+[project.gui-scripts]
+lianli-panel-gui = "lianli_panel.gui.app:main"
+
+# PySide6 is DELIBERATELY not a dependency. It is the system RPM
+# python3-pyside6, visible through this venv's --system-site-packages; listing
+# it here would make `pip install` try to fetch a wheel that does not need to
+# exist, in an environment that is offline by design.
+[tool.setuptools]
+packages = ["lianli_panel", "lianli_panel.gui"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
