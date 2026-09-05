@@ -193,6 +193,48 @@ def set_threshold(w: Widget, index: int, raw: float | None) -> bool:
     return True
 
 
+@dataclass
+class SpanChange:
+    rewritten: list[int] = field(default_factory=list)
+    clamped: list[int] = field(default_factory=list)
+
+
+def set_span(w: Widget, value_min: float, value_max: float) -> SpanChange:
+    """Move value_min/value_max and hold the REAL thresholds still.
+
+    Stored range maxima are percentages OF THIS SPAN, so writing value_max
+    straight into the dict moves every colour boundary in real terms while no
+    visible field changes. The spec settles the direction: raw stays fixed,
+    because the user typed degrees and means degrees. So the percentages are
+    re-encoded around the new span and the real numbers stay put.
+
+    raw_to_pct CLAMPS to [0,100]. Narrowing a span past a threshold therefore
+    cannot preserve it -- that threshold collapses onto an endpoint and the
+    index is reported in `clamped`, so the UI can say the value is gone rather
+    than let the user widen the span again and wonder why it did not come back.
+    """
+    new_min, new_max = float(value_min), float(value_max)
+    if widget_span(w) == (new_min, new_max):
+        # Unchanged: re-encoding untouched percentages drifts their stored
+        # floats on every save and breaks the lossless round trip.
+        return SpanChange()
+
+    before = range_thresholds_raw(w)     # real units, under the OLD span
+    w.kind["value_min"] = new_min
+    w.kind["value_max"] = new_max
+
+    change = SpanChange()
+    lo, hi = min(new_min, new_max), max(new_min, new_max)
+    for i, raw in enumerate(before):
+        if raw is None:                  # the catch-all has no threshold
+            continue
+        set_range_threshold_raw(w, i, raw)
+        change.rewritten.append(i)
+        if raw < lo or raw > hi:
+            change.clamped.append(i)
+    return change
+
+
 def add_range(w: Widget, raw: float) -> int:
     """Inserted before the catch-all: a range after `max: null` is unreachable,
     because the first range whose max >= percentage wins."""

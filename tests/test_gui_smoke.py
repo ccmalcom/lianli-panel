@@ -174,3 +174,22 @@ def test_a_conflicting_apply_writes_nothing_when_declined(qapp, win, monkeypatch
     win.draft.base_hash = "0" * 64
     win.apply_now()
     assert "SetLcdTemplates" not in win.client.methods()
+
+
+def test_editing_value_max_in_the_inspector_holds_the_real_thresholds(qapp, win):
+    """The cpu widget stores max=60 on a 0..100 span, i.e. 60%. Widening to
+    0..200 must leave the boundary meaning 60, which is 30%. Writing value_max
+    straight into the dict would leave 60% and move the boundary to 120 with
+    nothing on screen to show for it."""
+    win._select("cpu")
+    win.inspector.editors["value_max"].setValue(200.0)
+    ranges = win.draft.widget("cpu").kind["ranges"]
+    assert ranges[0]["max"] == pytest.approx(30.0)
+    assert ranges[1]["max"] is None
+
+
+def test_editing_value_max_marks_the_draft_dirty(qapp, win):
+    win._select("cpu")
+    assert win.draft.dirty is False
+    win.inspector.editors["value_max"].setValue(120.0)
+    assert win.draft.dirty is True

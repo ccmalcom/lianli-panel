@@ -148,3 +148,65 @@ def test_add_and_remove_range():
 def test_forms_does_not_import_qt():
     import lianli_panel.gui.forms as mod
     assert "PySide6" not in open(mod.__file__).read()
+
+
+def _gauge_with_ranges():
+    """A fresh copy each time: these tests mutate the range dicts, and sharing
+    GAUGE's would let one test's rewrite leak into the next."""
+    return _widget({**GAUGE, "ranges": [dict(GAUGE["ranges"][0]),
+                                        dict(GAUGE["ranges"][1])]})
+
+
+def test_widening_the_span_holds_the_real_thresholds_still():
+    """60% of 20..100 is 68 C. After widening to 20..180 the boundary must
+    still MEAN 68 C, so the stored percentage has to drop to 30."""
+    w = _gauge_with_ranges()
+    change = forms.set_span(w, 20.0, 180.0)
+    assert w.kind["value_max"] == 180.0
+    assert w.kind["ranges"][0]["max"] == pytest.approx(30.0)
+    assert forms.range_rows(w)[0].threshold == pytest.approx(68.0)
+    assert change.rewritten == [0]
+    assert change.clamped == []
+
+
+def test_narrowing_the_span_past_a_threshold_clamps_and_says_so():
+    """raw_to_pct clamps to [0,100], so a threshold outside the new span
+    cannot be preserved. It collapses onto an endpoint -- reported, not lost
+    quietly, because widening the span again will not bring it back."""
+    w = _gauge_with_ranges()
+    change = forms.set_span(w, 20.0, 50.0)
+    assert change.clamped == [0]
+    assert w.kind["ranges"][0]["max"] == pytest.approx(100.0)
+
+
+def test_set_span_leaves_the_catch_all_null():
+    w = _gauge_with_ranges()
+    forms.set_span(w, 0.0, 200.0)
+    assert w.kind["ranges"][1]["max"] is None
+
+
+def test_set_span_writes_nothing_when_the_span_is_unchanged():
+    """Re-encoding a percentage the user never touched drifts the stored float
+    on every save -- the same rule set_threshold follows."""
+    w = _gauge_with_ranges()
+    change = forms.set_span(w, 20.0, 100.0)
+    assert change.rewritten == []
+    assert w.kind["ranges"][0]["max"] == 60.0
+
+
+def test_a_degenerate_span_normalises_to_zero():
+    """value_min == value_max is representable and must be defined rather than
+    dividing by zero."""
+    w = _gauge_with_ranges()
+    change = forms.set_span(w, 50.0, 50.0)
+    assert w.kind["ranges"][0]["max"] == 0.0
+    assert change.clamped == [0]
+
+
+def test_set_span_on_a_widget_with_no_ranges_just_writes_the_span():
+    w = _widget({"type": "vertical_bar", "source": {"type": "cpu_usage"},
+                 "value_min": 0.0, "value_max": 100.0,
+                 "background_color": [0, 0, 0, 255]})
+    change = forms.set_span(w, 10.0, 90.0)
+    assert (w.kind["value_min"], w.kind["value_max"]) == (10.0, 90.0)
+    assert change.rewritten == []

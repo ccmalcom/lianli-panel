@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox,
                                QWidget)
 from PySide6.QtGui import QColor
 
-from ..model import Widget
+from ..model import Widget, widget_span
 from ..schema import KIND_NAMES, SOURCE_NAMES
 from . import forms
 
@@ -142,9 +142,17 @@ class Inspector(QWidget):
     def _editor(self, spec: forms.FieldSpec, target: str):
         def write(value):
             obj = self.widget.kind if target == "kind" else self.widget.source
-            if obj is not None:
-                obj[spec.name] = value
-                self.changed.emit()
+            if obj is None:
+                return
+            # value_min/value_max are NOT ordinary numbers: every range
+            # threshold is a percentage of the span they define, so writing one
+            # through the generic path moves every colour boundary in real
+            # terms with nothing on screen to show for it.
+            if target == "kind" and spec.name in ("value_min", "value_max"):
+                self._write_span(spec.name, float(value))
+                return
+            obj[spec.name] = value
+            self.changed.emit()
 
         if spec.kind == "number":
             e = QDoubleSpinBox()
@@ -201,6 +209,20 @@ class Inspector(QWidget):
         entry = self.widget.kind["ranges"][index]
         entry["color"] = rgba[:3]
         entry["alpha"] = rgba[3]
+        self.changed.emit()
+
+    def _write_span(self, name: str, value: float) -> None:
+        lo, hi = widget_span(self.widget) or (0.0, 100.0)
+        lo, hi = (value, hi) if name == "value_min" else (lo, value)
+        change = forms.set_span(self.widget, lo, hi)
+        if change.clamped:
+            QMessageBox.warning(
+                self, "Thresholds clamped",
+                f"{len(change.clamped)} range threshold(s) fall outside the new "
+                f"{lo:g}..{hi:g} span and have been clamped to an endpoint. "
+                "Widening the span again will not restore the old values — "
+                "undo will.")
+        self._fill_ranges(self.widget)   # the table still shows the old numbers
         self.changed.emit()
 
     def _range_edited(self, item: QTableWidgetItem) -> None:
