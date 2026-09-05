@@ -54,6 +54,29 @@ def test_apply_points_the_lcd_entry_at_the_live_template(fake_client):
     assert params["config"]["type"] == "custom"
 
 
+def test_set_media_addresses_the_entry_by_the_daemons_own_key(fake_client):
+    """SetLcdMedia's device_id selects which config.lcds entry to overwrite, and
+    the daemon compares it against LcdConfig::device_id() -- "serial:<serial>",
+    not the bare id ListDevices reports. Sending the bare id never matches, so
+    the daemon appends a second entry instead of replacing the first; the next
+    config load drops the duplicate and keeps the FIRST, silently discarding
+    the switch. Verified live against lianli-daemon 0.8.8."""
+    c = _client(fake_client, [A])
+    apply_templates(c, [A, B], live_id="b", device_id=DEV)
+    params = next(p for m, p in c.calls if m == "SetLcdMedia")
+    assert params["device_id"] == f"serial:{DEV}"
+
+
+def test_set_media_keys_an_index_only_entry_by_index(fake_client):
+    """An entry with no serial is keyed "index:<n>" by the same daemon method."""
+    c = _client(fake_client, [A])
+    c.responses["GetConfig"] = {"lcds": []}
+    fallback = {"index": 0, "type": "custom", "orientation": 90.0}
+    apply_templates(c, [A], live_id="a", device_id=DEV, lcd_entry_fallback=fallback)
+    params = next(p for m, p in c.calls if m == "SetLcdMedia")
+    assert params["device_id"] == "index:0"
+
+
 def test_conflict_when_the_stored_set_changed_under_us(fake_client):
     c = _client(fake_client, [A, B])
     with pytest.raises(ConflictError):

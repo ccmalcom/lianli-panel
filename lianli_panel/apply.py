@@ -1,6 +1,6 @@
 """Applying templates to the panel.
 
-THREE HAZARDS, all previously hit by hand-written scripts:
+FOUR HAZARDS, all previously hit by hand-written scripts:
 
 1. SetLcdTemplates REPLACES THE ENTIRE STORED SET. The existing apply.sh sends
    only [gaming-dash], which is harmless with one template and silently deletes
@@ -15,6 +15,15 @@ THREE HAZARDS, all previously hit by hand-written scripts:
    cannot represent template mode. The entry is restored from a caller-supplied
    known-good copy -- never invented, because a wrong orientation or serial
    would render sideways or not at all.
+
+4. SetLcdMedia's device_id parameter is NOT the id ListDevices reports. It is
+   matched against LcdConfig::device_id(), which is "serial:<serial>". Passing
+   the bare "hid:..." never matches, so the daemon APPENDS a second lcds entry
+   rather than replacing the first. Nothing errors: the reply is status ok, and
+   the appended entry is even briefly visible over GetConfig. The next config
+   load then collapses duplicate serials keeping the FIRST -- the stale one --
+   so the template switch is silently discarded and the panel keeps rendering
+   the old template. entry_key() is the only place this format is built.
 
 The two calls are not atomic. If SetLcdMedia fails, the stored set has moved on
 while the panel still shows the old frame, so the previous set is restored.
@@ -80,6 +89,22 @@ def find_lcd(client) -> str:
     raise ApplyFailed("no LCD device found; is the screen plugged in?")
 
 
+def entry_key(entry: dict) -> str:
+    """The daemon's own key for a config.lcds entry.
+
+    Mirrors LcdConfig::device_id() in lianli-shared: "serial:<serial>", else
+    "index:<n>". SetLcdMedia's device_id parameter is matched against THIS, not
+    against the bare id ListDevices reports -- see apply_templates.
+    """
+    serial = entry.get("serial")
+    if serial:
+        return f"serial:{serial}"
+    index = entry.get("index")
+    if index is not None:
+        return f"index:{index}"
+    return "unknown"
+
+
 def _lcd_entry(client, device_id: str, fallback: dict | None) -> dict:
     config = client.call("GetConfig") or {}
     for entry in config.get("lcds") or []:
@@ -115,7 +140,8 @@ def apply_templates(client, templates: list[dict], live_id: str, *,
 
     client.call("SetLcdTemplates", {"templates": templates})
     try:
-        client.call("SetLcdMedia", {"device_id": device_id, "config": entry})
+        client.call("SetLcdMedia",
+                    {"device_id": entry_key(entry), "config": entry})
     except DaemonError as exc:
         try:
             client.call("SetLcdTemplates", {"templates": previous})
