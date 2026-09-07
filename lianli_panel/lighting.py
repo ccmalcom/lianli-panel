@@ -81,6 +81,23 @@ class LightingState:
         )
 
 
+def interlock_text(mode: str, poller_running: bool) -> str:
+    """What Apply will do to lianli-thermal-rgb.service, said in advance.
+
+    Static and Off conflict with the poller, which re-drives the ring every
+    ~2s. Applying either stops it. Saying so only afterwards would make the
+    app look like it had a side effect nobody asked for.
+    """
+    if mode == "thermal" and not poller_running:
+        return ("Applying will START lianli-thermal-rgb.service, which then "
+                "drives the ring from the hotter of CPU and GPU.")
+    if mode in ("static", "off") and poller_running:
+        return ("Applying will STOP lianli-thermal-rgb.service first — it "
+                "re-drives the ring every ~2s and would overwrite this colour "
+                "within seconds.")
+    return ""
+
+
 def problems(state: LightingState) -> list[Problem]:
     out: list[Problem] = []
 

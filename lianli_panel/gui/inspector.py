@@ -43,6 +43,15 @@ class ColorButton(QPushButton):
         self.setText(f"{r},{g},{b},{a}")
         self.setStyleSheet(f"background: rgb({r},{g},{b});")
 
+    def rgba(self) -> list[int]:
+        return list(self._rgba)
+
+    def set_rgba(self, rgba: list[int]) -> None:
+        """Sets without emitting: callers use this to POPULATE, and an emit
+        here would report a user edit that never happened."""
+        self._rgba = [int(c) for c in (list(rgba) + [255, 255, 255, 255])[:4]]
+        self._paint()
+
     def _pick(self) -> None:
         r, g, b, a = self._rgba
         chosen = QColorDialog.getColor(

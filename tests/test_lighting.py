@@ -205,3 +205,21 @@ def test_the_module_does_not_import_pyside6():
     """This module is dispatchable precisely because it has no display
     dependency. An accidental PySide6 import moves it out of Codex's reach."""
     assert "PySide6" not in open(lighting.__file__).read()
+
+
+def test_the_interlock_warns_before_apply_not_after():
+    """The user needs to know Apply will stop a service BEFORE they press it.
+    Telling them afterwards is an apology, not a warning."""
+    text = lighting.interlock_text("static", poller_running=True)
+    assert "stop" in text.lower()
+    assert "lianli-thermal-rgb" in text
+
+
+def test_the_interlock_says_thermal_will_start_the_service():
+    text = lighting.interlock_text("thermal", poller_running=False)
+    assert "start" in text.lower()
+
+
+def test_the_interlock_says_nothing_when_no_unit_change_is_needed():
+    assert lighting.interlock_text("thermal", poller_running=True) == ""
+    assert lighting.interlock_text("static", poller_running=False) == ""
