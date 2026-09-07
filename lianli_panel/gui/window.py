@@ -10,19 +10,25 @@ and an empty draft, never a traceback at startup.
 """
 from __future__ import annotations
 
-from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow,
-                               QMessageBox, QToolBar, QVBoxLayout, QWidget)
+import copy
 
-from .. import health
+from PySide6.QtWidgets import (QApplication, QHBoxLayout, QMainWindow,
+                               QMessageBox, QTabWidget, QToolBar, QVBoxLayout,
+                               QWidget)
+
 from .. import apply as apply_mod
+from .. import health, lighting, ring, sensors
 from .. import snapshot
 from ..apply import read_templates
 from ..ipc import DaemonError
 from ..model import validate
+from . import links
 from .canvas import Canvas
 from .draft import Draft
 from .inspector import Inspector
-from .preview import PreviewWorker
+from .lighting_tab import LightingTab
+from .preview import PreviewWorker, ProbeWorker
+from .sensors_tab import SensorsTab
 from .sidebar import TemplateList, WidgetList
 from .status import BannerStack, HealthPoller
 
@@ -30,9 +36,12 @@ TITLE = "lianli-panel"
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, client, *, health_poller=None) -> None:
+    def __init__(self, client, *, health_poller=None, lighting_ops=None) -> None:
         super().__init__()
         self.client = client
+        self.ops = lighting_ops or apply_mod.default_ops()
+        self.base_lighting = lighting.LightingState()
+        self.links: dict = {}
         self.setWindowTitle(TITLE)
         self.resize(1500, 700)
         self.frame_bytes: bytes | None = None
@@ -77,9 +86,27 @@ class MainWindow(QMainWindow):
         body.addWidget(self.canvas, 1)
         body.addWidget(self.inspector)
 
+        editor = QWidget()
+        editor.setLayout(body)
+
+        self.sensors_tab = SensorsTab()
+        self.sensors_tab.library_changed.connect(self._library_changed)
+        self.sensors_tab.bind_requested.connect(self._bind_sensor)
+        self.sensors_tab.probe_requested.connect(self._probe_sensor)
+        self.sensors_tab.set_library(sensors.load())
+
+        self.lighting_tab = LightingTab()
+        self.lighting_tab.changed.connect(self._lighting_edited)
+        self.lighting_tab.test_requested.connect(self._test_ring)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(editor, "Editor")
+        self.tabs.addTab(self.sensors_tab, "Sensors")
+        self.tabs.addTab(self.lighting_tab, "Lighting")
+
         root = QVBoxLayout()
         root.addWidget(self.banner)
-        root.addLayout(body, 1)
+        root.addWidget(self.tabs, 1)
         holder = QWidget()
         holder.setLayout(root)
         self.setCentralWidget(holder)
@@ -87,6 +114,10 @@ class MainWindow(QMainWindow):
         self.worker = PreviewWorker(client, parent=self)
         self.worker.rendered.connect(self.set_frame)
         self.worker.failed.connect(self._render_failed)
+
+        self.probe = ProbeWorker(client, parent=self)
+        self.probe.done.connect(self.sensors_tab.show_probe)
+        self.probe.failed.connect(self.sensors_tab.show_probe_error)
 
         # Injectable so tests do not shell out to journalctl. The connection is
         # made BEFORE the first poll or the first report is lost.
@@ -121,6 +152,22 @@ class MainWindow(QMainWindow):
         live = apply_mod.live_template_id(config, apply_mod.LCD_SERIAL)
         self.draft = Draft(templates, live)
         self._refresh_lists()
+        entry = next((e for e in config.get("lcds") or []
+                      if e.get("serial") == apply_mod.LCD_SERIAL), {})
+        last = ring.load_ring_state()
+        state = lighting.LightingState(
+            mode=last.mode,
+            color=last.color,
+            ring_brightness=last.brightness,
+            # The one lighting value with a real read-back. None means the
+            # daemon has never been told, and 0 would be a black screen.
+            screen_brightness=entry.get("brightness"),
+            thermal=ring.load_thermal())
+        self.base_lighting = state.copy()
+        self.lighting_tab.set_state(state)
+        self.lighting_tab.set_last_set(last)
+        self.lighting_tab.set_poller_running(self.ops.poller_active())
+        self.revalidate_links()
 
     def rerender(self) -> None:
         current = self.draft.current()
@@ -164,45 +211,84 @@ class MainWindow(QMainWindow):
     # --- applying ----------------------------------------------------------
 
     def apply_now(self) -> None:
-        """The ONLY write path. Snapshot, then apply_templates, which sends the
-        whole set and follows SetLcdTemplates with SetLcdMedia as one
-        transaction."""
+        """The ONLY write path. Snapshot, then apply templates and lighting."""
         current = self.draft.current()
         if current is not None:
-            errors = [p for p in validate(current) if p.level == "error"]
+            problems = validate(current)
+            warnings = [p for p in problems if p.level == "warning"]
+            if warnings:
+                # Computed and thrown away until now. "No catch-all range"
+                # means values above the last threshold have no colour at all
+                # -- worth saying, not worth refusing.
+                self.banner.show_banner("validate", "\n".join(
+                    f"{p.widget_id}: {p.message}" for p in warnings), "warn")
+            else:
+                self.banner.clear("validate")
+            errors = [p for p in problems if p.level == "error"]
             if errors:
                 listing = "\n".join(f"{p.widget_id}: {p.message}" for p in errors)
                 if QMessageBox.question(
                         self, "Apply anyway?",
-                        f"This template has errors:\n\n{listing}") != QMessageBox.Yes:
+                        f"This template has errors:\n\n{listing}"
+                ) != QMessageBox.StandardButton.Yes:
                     return
         try:
-            snap = snapshot.take(self.client)
+            snap = snapshot.take(self.client,
+                                 poller_active=self.ops.poller_active)
         except Exception as exc:               # a snapshot must never block a fix
             snap = None
             self._warn(f"could not snapshot before applying: {exc}")
+        draft_lighting = self.lighting_tab.state()
         try:
-            apply_mod.apply_templates(
-                self.client, self.draft.payload(), self.draft.live_id,
+            stages = apply_mod.apply_all(
+                self.client, templates=self.draft.payload(),
+                live_id=self.draft.live_id,
+                base_lighting=self.base_lighting,
+                draft_lighting=draft_lighting,
                 base_hash=self.draft.base_hash,
-                lcd_entry_fallback=apply_mod.lcd_entry_fallback())
+                lcd_entry_fallback=apply_mod.lcd_entry_fallback(),
+                ops=self.ops)
         except apply_mod.ConflictError as exc:
             if QMessageBox.question(
                     self, "The daemon's templates changed",
                     f"{exc}\n\nOverwrite their change with this draft?"
-            ) != QMessageBox.Yes:
+            ) != QMessageBox.StandardButton.Yes:
                 return
             self.draft.base_hash = apply_mod.read_templates(self.client)[1]
             self.apply_now()
+            return
+        except apply_mod.PartialApply as exc:
+            QMessageBox.critical(self, "Apply did not complete", str(exc)
+                                 + "\n\n" + self._stage_report(exc.stages))
+            self.load()
             return
         except apply_mod.ApplyFailed as exc:
             QMessageBox.critical(self, "Apply failed", str(exc))
             return
         self.draft.mark_applied(self.draft.payload())
+        self.base_lighting = draft_lighting.copy()
+        self.lighting_tab.set_poller_running(self.ops.poller_active())
+        self.lighting_tab.set_last_set(ring.load_ring_state())
         self.health.poll()
         self.statusBar().showMessage(
-            f"applied · live: {self.draft.live_id}"
-            + (f" · snapshot {snap.name}" if snap else ""), 10000)
+            f"applied · live: {self.draft.live_id} · "
+            + self._stage_summary(stages)
+            + (f" · snapshot {snap.name}" if snap else ""), 12000)
+
+    @staticmethod
+    def _stage_summary(stages) -> str:
+        done = [s.name for s in stages if s.status in ("done", "unverifiable")]
+        return ("lighting unchanged" if not done
+                else "committed: " + ", ".join(done))
+
+    @staticmethod
+    def _stage_report(stages) -> str:
+        """Every stage, including the skipped ones. After a partial apply the
+        user's first question is 'what state is my machine in now', and a
+        summary that mentions only failures cannot answer it."""
+        return "\n".join(
+            f"{s.name}: {s.status}" + (f" — {s.detail}" if s.detail else "")
+            for s in stages)
 
     def revert(self) -> None:
         newest = snapshot.latest()
@@ -245,7 +331,12 @@ class MainWindow(QMainWindow):
 
     def _select(self, widget_id: str) -> None:
         self.draft.selection = widget_id or None
-        self.inspector.set_widget(self.draft.widget(widget_id) if widget_id else None)
+        widget = self.draft.widget(widget_id) if widget_id else None
+        self.inspector.set_widget(widget)
+        self.sensors_tab.set_target(
+            self.draft.current_id if widget else None,
+            widget_id or None,
+            widget.kind_type if widget else "")
 
     def _select_from_list(self, widget_id: str) -> None:
         self.canvas.set_selection(widget_id or None)
@@ -292,6 +383,69 @@ class MainWindow(QMainWindow):
 
     def _render_failed(self, message: str) -> None:
         self._warn(f"preview render failed: {message}", key="render")
+
+    def _lighting_edited(self) -> None:
+        state = self.lighting_tab.state()
+        self.lighting_tab.set_problems(lighting.problems(state))
+
+    def lighting_dirty(self) -> bool:
+        return self.lighting_tab.state() != self.base_lighting
+
+    def _test_ring(self) -> None:
+        """The ONE control that reaches the hardware before Apply, and only
+        because the user pressed a button captioned as doing exactly that --
+        the same rule as the Editor tab's 'Refresh (runs sensors)'."""
+        state = self.lighting_tab.state()
+        try:
+            ring.set_mode(self.client, state.mode, tuple(state.color),
+                          state.ring_brightness)
+        except (DaemonError, ValueError, RuntimeError) as exc:
+            self._warn(f"could not drive the ring: {exc}", key="ring")
+            return
+        self.banner.clear("ring")
+        self.statusBar().showMessage(
+            "sent to the ring — it cannot be read back, so look at it", 8000)
+
+    def _library_changed(self) -> None:
+        sensors.save(self.sensors_tab.library())
+        self.revalidate_links()
+
+    def _bind_sensor(self, name: str) -> None:
+        widget_id = self.draft.selection
+        sensor = self.sensors_tab.library().get(name)
+        if widget_id is None or sensor is None:
+            return
+        widget = self.draft.widget(widget_id)
+        if widget is None:
+            return
+        self.draft.checkpoint()
+        widget.kind["source"] = copy.deepcopy(sensor.source)
+        self.links = links.bind(self.links, self.draft.current_id, widget_id,
+                                name)
+        links.save(self.links)
+        self.draft.dirty = True
+        self.inspector.set_widget(widget)
+        self.rerender()
+        self.statusBar().showMessage(f"{widget_id} now reads {name}", 8000)
+
+    def _probe_sensor(self, cmd: str) -> None:
+        if not self.probe.probe(cmd):
+            self.statusBar().showMessage("a probe is already running", 3000)
+
+    def revalidate_links(self) -> None:
+        """A side-car map cannot know that apply.sh or lianli-gui edited a
+        template, so it is checked against the templates every time either
+        changes. A dropped link is SHOWN -- silently forgetting one looks
+        identical to never having made it."""
+        kept, dropped = links.validate(links.load(), self.draft.payload(),
+                                       self.sensors_tab.library())
+        self.links = kept
+        if dropped:
+            self.banner.show_banner("links", "\n".join(
+                f"{d.link[0]}/{d.link[1]} is no longer bound to {d.name}: "
+                f"{d.reason}" for d in dropped), "warn")
+        else:
+            self.banner.clear("links")
 
     def _warn(self, message: str, key: str = "daemon") -> None:
         self.banner.show_banner(key, message)
@@ -340,12 +494,14 @@ class MainWindow(QMainWindow):
         self.banner.show_banner("config", problem, "error")
 
     def closeEvent(self, event) -> None:
-        if self.isVisible() and self.draft.dirty and QMessageBox.question(
+        unapplied = self.draft.dirty or self.lighting_dirty()
+        if self.isVisible() and unapplied and QMessageBox.question(
                 self, "Unapplied changes",
                 "This draft has changes that were never applied. Close anyway?"
-        ) != QMessageBox.Yes:
+        ) != QMessageBox.StandardButton.Yes:
             event.ignore()
             return
         self.worker.stop()
+        self.probe.stop()
         self.health.stop()
         super().closeEvent(event)

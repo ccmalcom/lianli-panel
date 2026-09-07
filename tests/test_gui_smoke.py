@@ -63,10 +63,27 @@ def stub_poller(report=None, pids=()):
                         interval_ms=0)
 
 
+def stub_lighting_ops():
+    """The real lighting operations shell out to systemctl. Tests must not."""
+    from lianli_panel import apply as apply_mod
+    from lianli_panel.ring import ThermalConfig
+    thermal = ThermalConfig()
+    return apply_mod.LightingOps(
+        read_thermal=lambda: thermal,
+        write_thermal=lambda cfg: None,
+        poller_active=lambda: True,
+        stop_poller=lambda: None,
+        start_poller=lambda: None,
+        set_ring=lambda c, m, col, b: None,
+        set_lcd_brightness=lambda c, d, v: None,
+        save_ring_state=lambda m, col, b: None)
+
+
 @pytest.fixture
 def win(qapp):
     from lianli_panel.gui.window import MainWindow
-    w = MainWindow(make_client(), health_poller=stub_poller())
+    w = MainWindow(make_client(), health_poller=stub_poller(),
+                   lighting_ops=stub_lighting_ops())
     yield w
     w.close()
 
@@ -91,7 +108,8 @@ def test_window_survives_a_dead_daemon(qapp):
     from lianli_panel.ipc import DaemonDown
     from lianli_panel.gui.window import MainWindow
     w = MainWindow(make_client(GetLcdTemplates=DaemonDown("no socket")),
-                   health_poller=stub_poller())
+                   health_poller=stub_poller(),
+                   lighting_ops=stub_lighting_ops())
     assert w.draft.templates == []
     assert "daemon" in w.banner.text().lower()
     w.close()
@@ -213,7 +231,8 @@ def test_a_dead_panel_raises_the_health_banner(qapp):
     from lianli_panel import health
     from lianli_panel.gui.window import MainWindow
     dead = health.PanelHealth(False, "the panel was disconnected at 17:59:48")
-    w = MainWindow(make_client(), health_poller=stub_poller(dead))
+    w = MainWindow(make_client(), health_poller=stub_poller(dead),
+                   lighting_ops=stub_lighting_ops())
     assert wait(qapp, lambda: "health" in w.banner.keys())
     assert "disconnected" in w.banner.text()
     assert "heuristic" in w.banner.text()
@@ -228,7 +247,8 @@ def test_the_vendor_gui_gets_its_own_banner(qapp):
     from lianli_panel import health
     from lianli_panel.gui.window import MainWindow
     dead = health.PanelHealth(False, "the panel was disconnected")
-    w = MainWindow(make_client(), health_poller=stub_poller(dead, pids=[4242]))
+    w = MainWindow(make_client(), health_poller=stub_poller(dead, pids=[4242]),
+                   lighting_ops=stub_lighting_ops())
     assert wait(qapp, lambda: sorted(w.banner.keys()) == ["health", "vendor-gui"])
     assert "4242" in w.banner.text()
     w.close()
