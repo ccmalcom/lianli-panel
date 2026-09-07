@@ -1,9 +1,22 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from lianli_panel.snapshot import latest, load, prune, take
+from tests.conftest import FakeClient
 
 A = {"id": "a", "name": "A", "widgets": []}
+
+
+@pytest.fixture(autouse=True)
+def _isolate_lighting_files_and_systemd(monkeypatch, tmp_path):
+    """Keep snapshot tests away from host state and the user systemd manager."""
+    from lianli_panel import ring, snapshot
+    monkeypatch.setattr(ring, "poller_active", lambda: False)
+    monkeypatch.setattr(ring, "load_thermal", lambda path=None: ring.ThermalConfig())
+    monkeypatch.setattr(ring, "load_ring_state", lambda path=None: ring.RingState())
+    monkeypatch.setattr(snapshot, "RGB_STATE_FILE", tmp_path / "rgb-state.json")
 
 
 def _client(fake_client):
@@ -68,3 +81,22 @@ def test_latest_returns_the_newest(tmp_path):
 
 def test_latest_on_an_empty_root_is_none(tmp_path):
     assert latest(tmp_path) is None
+
+
+def test_a_snapshot_records_the_poller_config_and_the_rings_last_set_state(
+        tmp_path, monkeypatch):
+    """Plan A's snapshot recorded only whether the unit was active, which is
+    not enough to describe -- let alone restore -- the lighting."""
+    from lianli_panel import ring, snapshot
+    monkeypatch.setattr(ring, "load_thermal",
+                        lambda path=None: ring.ThermalConfig(hot_c=90.0))
+    monkeypatch.setattr(ring, "load_ring_state",
+                        lambda path=None: ring.RingState("static", (1, 2, 3), 2,
+                                                         "2026-09-05T12:00:00"))
+    client = FakeClient({"GetLcdTemplates": [], "GetConfig": {"lcds": []}})
+    data = snapshot.load(snapshot.take(client, root=tmp_path,
+                                       poller_active=lambda: True))
+    assert data["thermal_service_active"] is True
+    assert data["thermal_config"]["hot_c"] == 90.0
+    assert data["ring_last_set"]["mode"] == "static"
+    assert data["ring_last_set"]["color"] == [1, 2, 3]

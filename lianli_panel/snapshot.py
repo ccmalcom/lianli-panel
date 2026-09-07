@@ -16,6 +16,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from . import ring
 from .apply import read_templates
 
 SNAPSHOT_ROOT = Path("~/.local/share/lianli-panel/snapshots").expanduser()
@@ -24,20 +25,14 @@ NOTE = ("configured state only; the ring's actual colour cannot be read back "
         "(GetZoneColors fails on this device)")
 
 
-def _thermal_active() -> bool:
-    import subprocess
-    try:
-        out = subprocess.run(
-            ["systemctl", "--user", "is-active", "lianli-thermal-rgb.service"],
-            capture_output=True, text=True, timeout=10)
-        return out.stdout.strip() == "active"
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-def take(client, root: Path | None = None, keep: int = 20) -> Path:
+def take(client, root: Path | None = None, keep: int = 20,
+         poller_active=None) -> Path:
+    """`poller_active` is injectable for the same reason apply.LightingOps is:
+    the real one runs systemctl, and the GUI's apply path snapshots first, so
+    leaving it hardcoded makes every apply test shell out."""
     root = Path(root) if root is not None else SNAPSHOT_ROOT
     root.mkdir(parents=True, exist_ok=True)
+    poller_active = poller_active or ring.poller_active
 
     templates, digest = read_templates(client)
     config = client.call("GetConfig") or {}
@@ -47,6 +42,7 @@ def take(client, root: Path | None = None, keep: int = 20) -> Path:
     except (OSError, json.JSONDecodeError):
         rgb_state = None
 
+    last_set = ring.load_ring_state()
     payload = {
         "taken_at": datetime.now().astimezone().isoformat(),
         "templates": templates,
@@ -54,7 +50,14 @@ def take(client, root: Path | None = None, keep: int = 20) -> Path:
         "lcds": config.get("lcds") or [],
         "rgb_config": config.get("rgb") or {},
         "rgb_state_file": rgb_state,
-        "thermal_service_active": _thermal_active(),
+        "thermal_service_active": poller_active(),
+        "thermal_config": ring.load_thermal().to_json(),
+        "ring_last_set": {
+            "mode": last_set.mode,
+            "color": list(last_set.color),
+            "brightness": last_set.brightness,
+            "set_at": last_set.set_at,
+        },
         "note": NOTE,
     }
 
