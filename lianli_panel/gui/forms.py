@@ -110,9 +110,17 @@ def kind_fields(w: Widget) -> list[FieldSpec]:
     return _fields(w.kind, WIDGET_KINDS.get(w.kind_type), True)
 
 
-def source_fields(w: Widget) -> list[FieldSpec]:
-    src = w.source or {}
+def source_fields_for(src: dict) -> list[FieldSpec]:
+    """Fields for a bare source dict, with no widget around it.
+
+    The sensor editor edits sources that are not attached to anything yet, so
+    it cannot go through a Widget. Same rules, same schema, one less layer.
+    """
     return _fields(src, SOURCE_TYPES.get(src.get("type", "")), True)
+
+
+def source_fields(w: Widget) -> list[FieldSpec]:
+    return source_fields_for(w.source or {})
 
 
 def is_unknown_kind(w: Widget) -> bool:

@@ -210,3 +210,21 @@ def test_set_span_on_a_widget_with_no_ranges_just_writes_the_span():
     change = forms.set_span(w, 10.0, 90.0)
     assert (w.kind["value_min"], w.kind["value_max"]) == (10.0, 90.0)
     assert change.rewritten == []
+
+
+def test_source_fields_can_be_derived_from_a_bare_source_dict():
+    """The sensor editor edits sources that are not attached to a widget yet,
+    so it cannot go through source_fields(w)."""
+    from lianli_panel.gui import forms
+    fields = forms.source_fields_for({"type": "hwmon", "name": "coretemp",
+                                      "label": "temp1"})
+    names = {f.name for f in fields}
+    assert {"name", "label"} <= names
+    assert all(f.name != "type" for f in fields)
+
+
+def test_source_fields_for_an_unknown_type_still_offers_its_own_keys():
+    """A daemon upgrade must degrade to reduced functionality, not data loss."""
+    from lianli_panel.gui import forms
+    fields = forms.source_fields_for({"type": "invented_later", "knob": 3})
+    assert {f.name for f in fields} == {"knob"}

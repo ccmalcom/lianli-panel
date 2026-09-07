@@ -98,3 +98,68 @@ class PreviewWorker(QObject):
         self._timer.stop()
         self._thread.quit()
         self._thread.wait(2000)
+
+
+class _ProbeJob(QObject):
+    done = Signal(bytes)
+    failed = Signal(str)
+
+    def __init__(self, client) -> None:
+        super().__init__()
+        self._client = client
+
+    @Slot(str)
+    def run(self, cmd: str) -> None:
+        from .. import sensors
+        try:
+            self.done.emit(sensors.render_authoritative(self._client, cmd))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
+class ProbeWorker(QObject):
+    """One authoritative sensor probe, off the UI thread.
+
+    DELIBERATELY NOT PreviewWorker. This render must EXECUTE the command --
+    that is the entire point of the authoritative tier -- so it must never
+    share the canvas's coalescer, where it would compete with drag renders for
+    the in-flight slot and could be debounced away entirely.
+
+    probe() returns False rather than queueing while one is in flight: every
+    probe really runs the command inside the daemon, so an impatient
+    double-click would otherwise be two real executions of something the user
+    was warned might have side effects.
+    """
+    done = Signal(bytes)
+    failed = Signal(str)
+    _submit = Signal(str)
+
+    def __init__(self, client, parent=None) -> None:
+        super().__init__(parent)
+        self._busy = False
+        self._thread = QThread()
+        self._job = _ProbeJob(client)
+        self._job.moveToThread(self._thread)
+        self._submit.connect(self._job.run)
+        self._job.done.connect(self._on_done)
+        self._job.failed.connect(self._on_failed)
+        self._thread.start()
+
+    def probe(self, cmd: str) -> bool:
+        if self._busy:
+            return False
+        self._busy = True
+        self._submit.emit(cmd)
+        return True
+
+    def _on_done(self, jpeg: bytes) -> None:
+        self._busy = False
+        self.done.emit(jpeg)
+
+    def _on_failed(self, message: str) -> None:
+        self._busy = False
+        self.failed.emit(message)
+
+    def stop(self) -> None:
+        self._thread.quit()
+        self._thread.wait(2000)
