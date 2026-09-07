@@ -50,6 +50,20 @@ def build_parser() -> argparse.ArgumentParser:
     rs.add_argument("r", type=int)
     rs.add_argument("g", type=int)
     rs.add_argument("b", type=int)
+    rsub.add_parser("thermal", help="hand the ring back to the poller")
+    rb = rsub.add_parser("brightness", help="set the PANEL's backlight, 0-255")
+    rb.add_argument("value", type=int)
+
+    po = sub.add_parser("poller", help="the thermal poller's configuration")
+    posub = po.add_subparsers(dest="poller_cmd", required=True)
+    posub.add_parser("show")
+    ps = posub.add_parser("set")
+    ps.add_argument("--cool-c", type=float)
+    ps.add_argument("--hot-c", type=float)
+    ps.add_argument("--poll-ms", type=int)
+    ps.add_argument("--min-delta-c", type=float)
+    ps.add_argument("--force-refresh-s", type=int)
+    ps.add_argument("--brightness", type=int, help="the RING's, 0-4")
 
     return p
 
@@ -168,14 +182,43 @@ def main(argv: list[str] | None = None) -> int:
             if args.ring_cmd == "off":
                 ring.set_off(client)
                 print("ring off")
-            else:
+            elif args.ring_cmd == "static":
                 ring.set_static(client, (args.r, args.g, args.b))
                 print(f"ring static {args.r},{args.g},{args.b}")
+            elif args.ring_cmd == "brightness":
+                # NOT the ring's brightness. This is the panel's backlight, and
+                # the call cannot report failure -- see ring.set_lcd_brightness.
+                ring.set_lcd_brightness(client, apply_mod.find_lcd(client),
+                                        args.value)
+                print(f"panel brightness {args.value} sent (SetLcdBrightness "
+                      "cannot report failure; look at the screen)")
+                return 0
+            else:
+                ring.start_poller()
+                print("thermal poller started; it now owns the ring")
+                return 0
             print(ring.RGB_APPLY_WARNING)
             return 0
 
+        if args.cmd == "poller":
+            cfg = ring.load_thermal()
+            if args.poller_cmd == "show":
+                print(json.dumps(cfg.to_json(), indent=1))
+                print("active" if ring.poller_active() else "not running")
+                return 0
+            for name in ("cool_c", "hot_c", "poll_ms", "min_delta_c",
+                         "force_refresh_s", "brightness"):
+                value = getattr(args, name, None)
+                if value is not None:
+                    setattr(cfg, name, value)
+            ring.save_thermal(cfg)
+            print(json.dumps(cfg.to_json(), indent=1))
+            print("the poller re-reads this within one poll interval; no "
+                  "restart needed")
+            return 0
+
     except (DaemonError, apply_mod.ApplyFailed, apply_mod.ConflictError,
-            RuntimeError) as exc:
+            RuntimeError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
