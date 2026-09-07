@@ -21,6 +21,44 @@ Selection rectangles are overlaid on top of it.
 Edits accumulate in an in-memory draft. **Nothing reaches the daemon until
 Apply.** There is no auto-save, and closing with unapplied changes prompts.
 
+## Tabs
+
+**Editor** — the canvas, the template library, the inspector. Unchanged.
+
+**Sensors** — named sensors, and the two-tier test harness for `command`
+sources. The two tiers are not equivalent: *authoritative* renders the command
+through the daemon as uid `lianli`, which is the only tier that proves
+anything; *diagnostic* runs it as you and will succeed on `$HOME` paths the
+daemon cannot traverse. Both really execute the command, so both ask first.
+
+Scripts the daemon must read belong in `/var/lib/lianli-panel/`. `/home/chase`
+is mode 0700 and uid `lianli` cannot enter it.
+
+**Lighting** — the ring, both brightnesses, and the thermal poller's settings.
+
+## What Apply means
+
+One Apply commits everything, in stages, cheapest and most reversible first:
+
+1. the poller's config file
+2. starting or stopping `lianli-thermal-rgb.service`
+3. the ring's colour (static and off only — in thermal mode the poller owns it)
+4. the template set, and the persistent half of the panel's brightness
+5. `SetLcdBrightness`, to make that brightness take effect now
+
+Nothing touches the template set until every lighting stage has succeeded. If
+one fails, the stages before it are rolled back and the dialog lists what
+happened to each.
+
+Two stages report themselves as unverifiable rather than claiming success:
+the ring has no read-back at all (`GetZoneColors` fails on this device), and
+`SetLcdBrightness` replies ok before it touches the device. Brightness is
+still safe because it is *persisted* by stage 4, which is verifiable.
+
+**Test on ring** is the only control that reaches the hardware before Apply,
+and only because it says so. If the poller is running it will take the ring
+back within ~2s — which is the interlock telling the truth, not a bug.
+
 ## Things that are not obvious
 
 **Apply writes the whole library.** `SetLcdTemplates` replaces the entire
