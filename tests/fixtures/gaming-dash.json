@@ -1,0 +1,1236 @@
+{
+ "id": "gaming-dash",
+ "name": "Gaming Dash",
+ "base_width": 1920,
+ "base_height": 480,
+ "rotated": true,
+ "background": {
+  "type": "color",
+  "rgb": [
+   10,
+   13,
+   20,
+   255
+  ]
+ },
+ "widgets": [
+  {
+   "id": "cpu-head",
+   "kind": {
+    "type": "label",
+    "text": "CPU",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 26.0,
+    "color": [
+     167,
+     139,
+     250,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 8.0
+   },
+   "x": 300.0,
+   "y": 44.0,
+   "width": 300.0,
+   "height": 40.0
+  },
+  {
+   "id": "cpu-ring",
+   "kind": {
+    "type": "radial_gauge",
+    "source": {
+     "type": "hwmon",
+     "name": "coretemp",
+     "label": "temp1",
+     "device_path": "coretemp.0"
+    },
+    "value_min": 20.0,
+    "value_max": 100.0,
+    "start_angle": 90.0,
+    "sweep_angle": 360.0,
+    "inner_radius_pct": 0.88,
+    "background_color": [
+     26,
+     32,
+     46,
+     255
+    ],
+    "ranges": [
+     {
+      "max": 50.0,
+      "color": [
+       167,
+       139,
+       250
+      ],
+      "alpha": 255
+     },
+     {
+      "max": 75.0,
+      "color": [
+       255,
+       184,
+       0
+      ],
+      "alpha": 255
+     },
+     {
+      "max": null,
+      "color": [
+       239,
+       68,
+       68
+      ],
+      "alpha": 255
+     }
+    ],
+    "bg_corner_radius": 0.0,
+    "value_corner_radius": 0.0,
+    "gradient": false
+   },
+   "x": 180.0,
+   "y": 185.0,
+   "width": 200.0,
+   "height": 200.0
+  },
+  {
+   "id": "cpu-temp",
+   "kind": {
+    "type": "value_text",
+    "source": {
+     "type": "hwmon",
+     "name": "coretemp",
+     "label": "temp1",
+     "device_path": "coretemp.0"
+    },
+    "format": "{:.0}",
+    "unit": "\u00b0",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf"
+    },
+    "font_size": 50.0,
+    "color": [
+     255,
+     255,
+     255,
+     255
+    ],
+    "align": "center",
+    "value_min": 20.0,
+    "value_max": 100.0,
+    "ranges": [
+     {
+      "max": 50.0,
+      "color": [
+       167,
+       139,
+       250
+      ],
+      "alpha": 255
+     },
+     {
+      "max": 75.0,
+      "color": [
+       255,
+       184,
+       0
+      ],
+      "alpha": 255
+     },
+     {
+      "max": null,
+      "color": [
+       239,
+       68,
+       68
+      ],
+      "alpha": 255
+     }
+    ],
+    "letter_spacing": 0.0
+   },
+   "x": 180.0,
+   "y": 176.0,
+   "width": 170.0,
+   "height": 70.0
+  },
+  {
+   "id": "cpu-templbl",
+   "kind": {
+    "type": "label",
+    "text": "TEMP",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 16.0,
+    "color": [
+     110,
+     125,
+     150,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 3.0
+   },
+   "x": 180.0,
+   "y": 224.0,
+   "width": 170.0,
+   "height": 26.0
+  },
+  {
+   "id": "cpu-memring",
+   "kind": {
+    "type": "radial_gauge",
+    "source": {
+     "type": "command",
+     "cmd": "/var/tmp/lianli-stats/bin/ram_gb.sh"
+    },
+    "value_min": 0.0,
+    "value_max": 31.121456146240234,
+    "start_angle": 90.0,
+    "sweep_angle": 360.0,
+    "inner_radius_pct": 0.88,
+    "background_color": [
+     26,
+     32,
+     46,
+     255
+    ],
+    "ranges": [
+     {
+      "max": 70.0,
+      "color": [
+       167,
+       139,
+       250
+      ],
+      "alpha": 255
+     },
+     {
+      "max": 90.0,
+      "color": [
+       255,
+       184,
+       0
+      ],
+      "alpha": 255
+     },
+     {
+      "max": null,
+      "color": [
+       239,
+       68,
+       68
+      ],
+      "alpha": 255
+     }
+    ],
+    "bg_corner_radius": 0.0,
+    "value_corner_radius": 0.0,
+    "gradient": false
+   },
+   "x": 420.0,
+   "y": 185.0,
+   "width": 200.0,
+   "height": 200.0,
+   "update_interval_ms": 2000
+  },
+  {
+   "id": "cpu-memval",
+   "kind": {
+    "type": "value_text",
+    "source": {
+     "type": "command",
+     "cmd": "/var/tmp/lianli-stats/bin/ram_gb.sh"
+    },
+    "format": "{:.1}",
+    "unit": "",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf"
+    },
+    "font_size": 46.0,
+    "color": [
+     255,
+     255,
+     255,
+     255
+    ],
+    "align": "center",
+    "value_min": 0.0,
+    "value_max": 31.121456146240234,
+    "ranges": [
+     {
+      "max": 70.0,
+      "color": [
+       167,
+       139,
+       250
+      ],
+      "alpha": 255
+     },
+     {
+      "max": 90.0,
+      "color": [
+       255,
+       184,
+       0
+      ],
+      "alpha": 255
+     },
+     {
+      "max": null,
+      "color": [
+       239,
+       68,
+       68
+      ],
+      "alpha": 255
+     }
+    ],
+    "letter_spacing": 0.0
+   },
+   "x": 420.0,
+   "y": 176.0,
+   "width": 170.0,
+   "height": 70.0,
+   "update_interval_ms": 2000
+  },
+  {
+   "id": "cpu-memlbl",
+   "kind": {
+    "type": "label",
+    "text": "RAM",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 16.0,
+    "color": [
+     110,
+     125,
+     150,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 3.0
+   },
+   "x": 420.0,
+   "y": 224.0,
+   "width": 170.0,
+   "height": 26.0
+  },
+  {
+   "id": "cpu-memtot",
+   "kind": {
+    "type": "label",
+    "text": "/ 31.1 GB",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 16.0,
+    "color": [
+     110,
+     125,
+     150,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 2.0
+   },
+   "x": 420.0,
+   "y": 300.0,
+   "width": 200.0,
+   "height": 24.0
+  },
+  {
+   "id": "cpu-load-l",
+   "kind": {
+    "type": "label",
+    "text": "LOAD",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 19.0,
+    "color": [
+     110,
+     125,
+     150,
+     255
+    ],
+    "align": "left",
+    "letter_spacing": 2.0
+   },
+   "x": 100.0,
+   "y": 392.0,
+   "width": 120.0,
+   "height": 28.0
+  },
+  {
+   "id": "cpu-load-b",
+   "kind": {
+    "type": "horizontal_bar",
+    "source": {
+     "type": "cpu_usage"
+    },
+    "value_min": 0.0,
+    "value_max": 100.0,
+    "background_color": [
+     26,
+     32,
+     46,
+     255
+    ],
+    "corner_radius": 4.0,
+    "ranges": [
+     {
+      "max": null,
+      "color": [
+       167,
+       139,
+       250
+      ],
+      "alpha": 255
+     }
+    ]
+   },
+   "x": 340.0,
+   "y": 392.0,
+   "width": 300.0,
+   "height": 16.0
+  },
+  {
+   "id": "cpu-load-v",
+   "kind": {
+    "type": "value_text",
+    "source": {
+     "type": "cpu_usage"
+    },
+    "format": "{:.0}",
+    "unit": "%",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 22.0,
+    "color": [
+     255,
+     255,
+     255,
+     255
+    ],
+    "align": "right",
+    "value_min": 0.0,
+    "value_max": 100.0,
+    "ranges": [
+     {
+      "max": null,
+      "color": [
+       167,
+       139,
+       250
+      ],
+      "alpha": 255
+     }
+    ],
+    "letter_spacing": 0.0
+   },
+   "x": 525.0,
+   "y": 392.0,
+   "width": 80.0,
+   "height": 30.0
+  },
+  {
+   "id": "gpu-head",
+   "kind": {
+    "type": "label",
+    "text": "GPU",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 26.0,
+    "color": [
+     34,
+     211,
+     238,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 8.0
+   },
+   "x": 1620.0,
+   "y": 44.0,
+   "width": 300.0,
+   "height": 40.0
+  },
+  {
+   "id": "gpu-ring",
+   "kind": {
+    "type": "radial_gauge",
+    "source": {
+     "type": "nvidia_gpu",
+     "gpu_index": 0,
+     "metric": "temp"
+    },
+    "value_min": 20.0,
+    "value_max": 100.0,
+    "start_angle": 90.0,
+    "sweep_angle": 360.0,
+    "inner_radius_pct": 0.88,
+    "background_color": [
+     26,
+     32,
+     46,
+     255
+    ],
+    "ranges": [
+     {
+      "max": 50.0,
+      "color": [
+       34,
+       211,
+       238
+      ],
+      "alpha": 255
+     },
+     {
+      "max": 75.0,
+      "color": [
+       255,
+       184,
+       0
+      ],
+      "alpha": 255
+     },
+     {
+      "max": null,
+      "color": [
+       239,
+       68,
+       68
+      ],
+      "alpha": 255
+     }
+    ],
+    "bg_corner_radius": 0.0,
+    "value_corner_radius": 0.0,
+    "gradient": false
+   },
+   "x": 1500.0,
+   "y": 185.0,
+   "width": 200.0,
+   "height": 200.0
+  },
+  {
+   "id": "gpu-temp",
+   "kind": {
+    "type": "value_text",
+    "source": {
+     "type": "nvidia_gpu",
+     "gpu_index": 0,
+     "metric": "temp"
+    },
+    "format": "{:.0}",
+    "unit": "\u00b0",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf"
+    },
+    "font_size": 50.0,
+    "color": [
+     255,
+     255,
+     255,
+     255
+    ],
+    "align": "center",
+    "value_min": 20.0,
+    "value_max": 100.0,
+    "ranges": [
+     {
+      "max": 50.0,
+      "color": [
+       34,
+       211,
+       238
+      ],
+      "alpha": 255
+     },
+     {
+      "max": 75.0,
+      "color": [
+       255,
+       184,
+       0
+      ],
+      "alpha": 255
+     },
+     {
+      "max": null,
+      "color": [
+       239,
+       68,
+       68
+      ],
+      "alpha": 255
+     }
+    ],
+    "letter_spacing": 0.0
+   },
+   "x": 1500.0,
+   "y": 176.0,
+   "width": 170.0,
+   "height": 70.0
+  },
+  {
+   "id": "gpu-templbl",
+   "kind": {
+    "type": "label",
+    "text": "TEMP",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 16.0,
+    "color": [
+     110,
+     125,
+     150,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 3.0
+   },
+   "x": 1500.0,
+   "y": 224.0,
+   "width": 170.0,
+   "height": 26.0
+  },
+  {
+   "id": "gpu-memring",
+   "kind": {
+    "type": "radial_gauge",
+    "source": {
+     "type": "command",
+     "cmd": "/var/tmp/lianli-stats/bin/vram_gb.sh"
+    },
+    "value_min": 0.0,
+    "value_max": 12.0,
+    "start_angle": 90.0,
+    "sweep_angle": 360.0,
+    "inner_radius_pct": 0.88,
+    "background_color": [
+     26,
+     32,
+     46,
+     255
+    ],
+    "ranges": [
+     {
+      "max": 70.0,
+      "color": [
+       34,
+       211,
+       238
+      ],
+      "alpha": 255
+     },
+     {
+      "max": 90.0,
+      "color": [
+       255,
+       184,
+       0
+      ],
+      "alpha": 255
+     },
+     {
+      "max": null,
+      "color": [
+       239,
+       68,
+       68
+      ],
+      "alpha": 255
+     }
+    ],
+    "bg_corner_radius": 0.0,
+    "value_corner_radius": 0.0,
+    "gradient": false
+   },
+   "x": 1740.0,
+   "y": 185.0,
+   "width": 200.0,
+   "height": 200.0,
+   "update_interval_ms": 2000
+  },
+  {
+   "id": "gpu-memval",
+   "kind": {
+    "type": "value_text",
+    "source": {
+     "type": "command",
+     "cmd": "/var/tmp/lianli-stats/bin/vram_gb.sh"
+    },
+    "format": "{:.1}",
+    "unit": "",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf"
+    },
+    "font_size": 46.0,
+    "color": [
+     255,
+     255,
+     255,
+     255
+    ],
+    "align": "center",
+    "value_min": 0.0,
+    "value_max": 12.0,
+    "ranges": [
+     {
+      "max": 70.0,
+      "color": [
+       34,
+       211,
+       238
+      ],
+      "alpha": 255
+     },
+     {
+      "max": 90.0,
+      "color": [
+       255,
+       184,
+       0
+      ],
+      "alpha": 255
+     },
+     {
+      "max": null,
+      "color": [
+       239,
+       68,
+       68
+      ],
+      "alpha": 255
+     }
+    ],
+    "letter_spacing": 0.0
+   },
+   "x": 1740.0,
+   "y": 176.0,
+   "width": 170.0,
+   "height": 70.0,
+   "update_interval_ms": 2000
+  },
+  {
+   "id": "gpu-memlbl",
+   "kind": {
+    "type": "label",
+    "text": "VRAM",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 16.0,
+    "color": [
+     110,
+     125,
+     150,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 3.0
+   },
+   "x": 1740.0,
+   "y": 224.0,
+   "width": 170.0,
+   "height": 26.0
+  },
+  {
+   "id": "gpu-memtot",
+   "kind": {
+    "type": "label",
+    "text": "/ 12.0 GB",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 16.0,
+    "color": [
+     110,
+     125,
+     150,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 2.0
+   },
+   "x": 1740.0,
+   "y": 300.0,
+   "width": 200.0,
+   "height": 24.0
+  },
+  {
+   "id": "gpu-load-l",
+   "kind": {
+    "type": "label",
+    "text": "LOAD",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 19.0,
+    "color": [
+     110,
+     125,
+     150,
+     255
+    ],
+    "align": "left",
+    "letter_spacing": 2.0
+   },
+   "x": 1420.0,
+   "y": 392.0,
+   "width": 120.0,
+   "height": 28.0
+  },
+  {
+   "id": "gpu-load-b",
+   "kind": {
+    "type": "horizontal_bar",
+    "source": {
+     "type": "nvidia_gpu",
+     "gpu_index": 0,
+     "metric": "usage"
+    },
+    "value_min": 0.0,
+    "value_max": 100.0,
+    "background_color": [
+     26,
+     32,
+     46,
+     255
+    ],
+    "corner_radius": 4.0,
+    "ranges": [
+     {
+      "max": null,
+      "color": [
+       34,
+       211,
+       238
+      ],
+      "alpha": 255
+     }
+    ]
+   },
+   "x": 1660.0,
+   "y": 392.0,
+   "width": 300.0,
+   "height": 16.0
+  },
+  {
+   "id": "gpu-load-v",
+   "kind": {
+    "type": "value_text",
+    "source": {
+     "type": "nvidia_gpu",
+     "gpu_index": 0,
+     "metric": "usage"
+    },
+    "format": "{:.0}",
+    "unit": "%",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 22.0,
+    "color": [
+     255,
+     255,
+     255,
+     255
+    ],
+    "align": "right",
+    "value_min": 0.0,
+    "value_max": 100.0,
+    "ranges": [
+     {
+      "max": null,
+      "color": [
+       34,
+       211,
+       238
+      ],
+      "alpha": 255
+     }
+    ],
+    "letter_spacing": 0.0
+   },
+   "x": 1845.0,
+   "y": 392.0,
+   "width": 80.0,
+   "height": 30.0
+  },
+  {
+   "id": "rule-l",
+   "kind": {
+    "type": "vertical_bar",
+    "source": {
+     "type": "constant",
+     "value": 100.0
+    },
+    "value_min": 0.0,
+    "value_max": 100.0,
+    "background_color": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "corner_radius": 0.0,
+    "ranges": [
+     {
+      "max": null,
+      "color": [
+       38,
+       48,
+       68
+      ],
+      "alpha": 255
+     }
+    ]
+   },
+   "x": 620.0,
+   "y": 240.0,
+   "width": 2.0,
+   "height": 300.0
+  },
+  {
+   "id": "rule-r",
+   "kind": {
+    "type": "vertical_bar",
+    "source": {
+     "type": "constant",
+     "value": 100.0
+    },
+    "value_min": 0.0,
+    "value_max": 100.0,
+    "background_color": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "corner_radius": 0.0,
+    "ranges": [
+     {
+      "max": null,
+      "color": [
+       38,
+       48,
+       68
+      ],
+      "alpha": 255
+     }
+    ]
+   },
+   "x": 1300.0,
+   "y": 240.0,
+   "width": 2.0,
+   "height": 300.0
+  },
+  {
+   "id": "fps-head",
+   "kind": {
+    "type": "label",
+    "text": "FRAMES PER SECOND",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 24.0,
+    "color": [
+     74,
+     222,
+     128,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 10.0
+   },
+   "x": 960.0,
+   "y": 44.0,
+   "width": 620.0,
+   "height": 40.0
+  },
+  {
+   "id": "head-cover",
+   "kind": {
+    "type": "horizontal_bar",
+    "source": {
+     "type": "command",
+     "cmd": "/var/tmp/lianli-stats/bin/idle.sh"
+    },
+    "value_min": 0.0,
+    "value_max": 1.0,
+    "background_color": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "corner_radius": 0.0,
+    "ranges": [
+     {
+      "max": null,
+      "color": [
+       10,
+       13,
+       20
+      ],
+      "alpha": 255
+     }
+    ]
+   },
+   "x": 960.0,
+   "y": 44.0,
+   "width": 640.0,
+   "height": 48.0,
+   "update_interval_ms": 1000
+  },
+  {
+   "id": "idle-date",
+   "kind": {
+    "type": "clock_digital",
+    "format": "%a %b %d",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "font_size": 30.0,
+    "color": [
+     110,
+     125,
+     150,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 8.0
+   },
+   "x": 960.0,
+   "y": 104.0,
+   "width": 620.0,
+   "height": 44.0
+  },
+  {
+   "id": "idle-time",
+   "kind": {
+    "type": "clock_digital",
+    "format": "%H:%M:%S",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf"
+    },
+    "font_size": 100.0,
+    "color": [
+     110,
+     125,
+     150,
+     255
+    ],
+    "align": "center",
+    "letter_spacing": 0.0
+   },
+   "x": 960.0,
+   "y": 182.0,
+   "width": 620.0,
+   "height": 130.0
+  },
+  {
+   "id": "value-cover",
+   "kind": {
+    "type": "horizontal_bar",
+    "source": {
+     "type": "command",
+     "cmd": "/var/tmp/lianli-stats/bin/fps.sh"
+    },
+    "value_min": 0.0,
+    "value_max": 1.0,
+    "background_color": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "corner_radius": 0.0,
+    "ranges": [
+     {
+      "max": null,
+      "color": [
+       10,
+       13,
+       20
+      ],
+      "alpha": 255
+     }
+    ]
+   },
+   "x": 960.0,
+   "y": 157.0,
+   "width": 640.0,
+   "height": 168.0,
+   "update_interval_ms": 1000
+  },
+  {
+   "id": "fps-value",
+   "kind": {
+    "type": "value_text",
+    "source": {
+     "type": "command",
+     "cmd": "/var/tmp/lianli-stats/bin/fps.sh"
+    },
+    "format": "{:.0}",
+    "unit": "",
+    "font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Bold.ttf"
+    },
+    "font_size": 122.0,
+    "color": [
+     255,
+     255,
+     255,
+     255
+    ],
+    "align": "center",
+    "value_min": 0.0,
+    "value_max": 240.0,
+    "ranges": [
+     {
+      "max": 0.4166666666666667,
+      "color": [
+       74,
+       222,
+       128
+      ],
+      "alpha": 0
+     },
+     {
+      "max": 12.5,
+      "color": [
+       239,
+       68,
+       68
+      ],
+      "alpha": 255
+     },
+     {
+      "max": 25.0,
+      "color": [
+       255,
+       184,
+       0
+      ],
+      "alpha": 255
+     },
+     {
+      "max": null,
+      "color": [
+       74,
+       222,
+       128
+      ],
+      "alpha": 255
+     }
+    ],
+    "letter_spacing": 0.0
+   },
+   "x": 960.0,
+   "y": 150.0,
+   "width": 520.0,
+   "height": 140.0,
+   "update_interval_ms": 1000
+  },
+  {
+   "id": "fps-graph",
+   "kind": {
+    "type": "sparkline",
+    "source": {
+     "type": "command",
+     "cmd": "/var/tmp/lianli-stats/bin/graph.sh"
+    },
+    "value_min": 0.0,
+    "value_max": 240.0,
+    "auto_range": true,
+    "history_length": 90,
+    "line_width": 2.5,
+    "line_color": [
+     74,
+     222,
+     128,
+     255
+    ],
+    "fill_color": [
+     74,
+     222,
+     128,
+     70
+    ],
+    "background_color": [
+     17,
+     22,
+     34,
+     255
+    ],
+    "ranges": [],
+    "border_color": [
+     38,
+     48,
+     68,
+     255
+    ],
+    "border_width": 1.0,
+    "corner_radius": 6.0,
+    "padding": 6.0,
+    "show_points": false,
+    "point_radius": 2.5,
+    "show_baseline": false,
+    "baseline_value": 0.0,
+    "baseline_color": [
+     140,
+     140,
+     160,
+     160
+    ],
+    "baseline_width": 1.0,
+    "smooth": true,
+    "scroll_rtl": false,
+    "fill_from_ranges": false,
+    "range_blend": false,
+    "show_gridlines": true,
+    "gridlines_horizontal": 3,
+    "gridlines_vertical": 0,
+    "gridline_color": [
+     120,
+     130,
+     150,
+     70
+    ],
+    "gridline_width": 1.0,
+    "show_axis_labels": true,
+    "axis_label_count": 3,
+    "axis_labels_on_right": true,
+    "axis_label_format": "{:.0}",
+    "axis_label_font": {
+     "path": "/usr/share/fonts/google-noto/NotoSansMono-Medium.ttf"
+    },
+    "axis_label_size": 13.0,
+    "axis_label_color": [
+     150,
+     165,
+     190,
+     200
+    ],
+    "axis_label_padding": 5.0
+   },
+   "x": 960.0,
+   "y": 342.0,
+   "width": 620.0,
+   "height": 192.0,
+   "update_interval_ms": 1000
+  }
+ ]
+}

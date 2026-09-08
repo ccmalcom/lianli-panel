@@ -1,0 +1,14 @@
+[Unit]
+Description=Drive the Lian Li LED ring from the hotter of CPU and GPU temperature
+Documentation=file:/usr/local/share/lianli-panel/thermal-rgb.py
+After=graphical-session.target
+
+[Service]
+Type=simple
+# The system daemon may still be starting; wait for its IPC socket first.
+ExecStart=/bin/sh -c 'i=0; while [ ! -S /run/lianli/lianli-daemon.sock ] && [ $i -lt 60 ]; do sleep 1; i=$((i+1)); done; exec /usr/bin/python3 /usr/local/share/lianli-panel/thermal-rgb.py'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

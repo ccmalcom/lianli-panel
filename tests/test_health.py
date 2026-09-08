@@ -88,3 +88,60 @@ def test_real_replug_sequence_is_unhealthy():
         OPEN_RING.replace("10:54:37", "18:00:10"),
     ]
     assert parse_journal(seq).ok is False
+
+
+from pathlib import Path
+
+from lianli_panel.health import config_lcds_problem, vendor_gui_pids
+
+SERIAL = "hid:513b5a7acadc4203"
+
+
+def _proc(root: Path, pid: int, comm: str, exe: str | None = None) -> None:
+    """One fake /proc/<pid>. The exe symlink is deliberately dangling: real
+    /proc/<pid>/exe points at a path this test has no business creating, and
+    vendor_gui_pids reads the link rather than following it."""
+    d = root / str(pid)
+    d.mkdir()
+    (d / "comm").write_text(comm + "\n")
+    if exe is not None:
+        (d / "exe").symlink_to(exe)
+
+
+def test_vendor_gui_found_by_comm(tmp_path):
+    _proc(tmp_path, 101, "lianli-gui")
+    _proc(tmp_path, 102, "bash")
+    (tmp_path / "not-a-pid").mkdir()
+    assert vendor_gui_pids(("lianli-gui",), tmp_path) == [101]
+
+
+def test_vendor_gui_found_by_exe_when_comm_is_truncated(tmp_path):
+    """The kernel truncates comm to 15 characters, so a longer binary name
+    never compares equal to itself. The exe symlink carries the full name."""
+    _proc(tmp_path, 201, "lianli-gui-lon", exe="/usr/bin/lianli-gui-longname")
+    assert vendor_gui_pids(("lianli-gui-longname",), tmp_path) == [201]
+
+
+def test_vendor_gui_ignores_an_unreadable_process(tmp_path):
+    """/proc/<pid>/exe is unreadable for another user's processes, and a
+    process can exit mid-scan. Neither may raise."""
+    d = tmp_path / "301"
+    d.mkdir()                       # no comm, no exe: a process that vanished
+    assert vendor_gui_pids(("lianli-gui",), tmp_path) == []
+
+
+def test_a_healthy_lcd_entry_reports_no_problem():
+    config = {"lcds": [{"serial": SERIAL, "type": "custom",
+                        "template_id": "gaming-dash", "orientation": 90}]}
+    assert config_lcds_problem(config, SERIAL) is None
+
+
+def test_an_empty_lcds_array_is_the_vendor_gui_wipe():
+    assert "EMPTY" in config_lcds_problem({"lcds": []}, SERIAL)
+
+
+def test_an_entry_in_media_mode_is_reported():
+    config = {"lcds": [{"serial": SERIAL, "type": "media",
+                        "template_id": "gaming-dash"}]}
+    problem = config_lcds_problem(config, SERIAL)
+    assert problem is not None and "custom" in problem
