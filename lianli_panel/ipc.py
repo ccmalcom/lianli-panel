@@ -11,6 +11,24 @@ from typing import Any
 
 DEFAULT_SOCK = "/run/lianli/lianli-daemon.sock"
 
+# Daemon 1.2+ refuses any write that is not wrapped in a Guarded envelope naming
+# its version, IPC protocol and instance; reads still pass bare. Mirrors
+# IpcRequest::is_read_only in lianli-shared/src/ipc.rs. A method missing here
+# is treated as a write, which is the safe direction: a guarded read still works.
+READ_ONLY = frozenset({
+    "ListDevices", "GetConfig", "CheckMediaAccess", "GetTelemetry",
+    "GetRgbCapabilities", "GetZoneColors", "ListRgbPresets", "GetWirelessOperation",
+    "ListSensors", "SuggestSensorSources", "ListPwmHeaders", "GetLcdTemplates",
+    "RenderTemplatePreview", "RenderSensorPreview", "Ping", "GetDaemonInfo",
+    "GetInstallationHealth", "GetChannel", "GetMergeLightingConfig",
+    "ListDeviceProfiles", "GetPixelCleanStatus", "GetStartupImageStatus",
+    "GetPixelCleanPreparation", "ListStateBackups", "GetCatalogInstallStatus",
+    "GetCatalogStorage", "GetManagedMediaStorage", "StartManagedMediaReview",
+    "GetManagedMediaReview", "StartCatalogReview", "GetCatalogReview",
+    "PreviewStateBackup",
+})
+PROTOCOL_VERSION = 1
+
 
 class DaemonError(Exception):
     """The daemon answered, and the answer was an error."""
@@ -33,6 +51,31 @@ class Client:
         req: dict[str, Any] = {"method": method}
         if params is not None:
             req["params"] = params
+        if method not in READ_ONLY:
+            req = self._guarded(req)
+        return self._send(req)
+
+    def _guarded(self, req: dict[str, Any]) -> dict[str, Any]:
+        # Fetched per write: instance_id changes whenever the daemon restarts.
+        try:
+            info = self._send({"method": "GetDaemonInfo"})
+        except (DaemonDown, DaemonRefused):
+            raise
+        except DaemonError:
+            return req  # pre-1.2 daemon: no GetDaemonInfo, no guard either
+        if "guarded_writes" not in (info.get("capabilities") or []):
+            return req
+        if info.get("protocol_version") != PROTOCOL_VERSION:
+            raise DaemonError(
+                f"daemon {info.get('version')} speaks IPC protocol "
+                f"{info.get('protocol_version')}; this client only knows {PROTOCOL_VERSION}")
+        guard = {"client_version": info["version"],
+                 "protocol_version": PROTOCOL_VERSION,
+                 "instance_id": info["instance_id"]}
+        return {"method": "Guarded", "params": {"guard": guard, "request": req}}
+
+    def _send(self, req: dict[str, Any]) -> Any:
+        method = req["method"]
         raw = self._roundtrip(json.dumps(req) + "\n")
         try:
             reply = json.loads(raw)

@@ -44,6 +44,21 @@ re-owning the copies to `root:root`. It leaves the originals under
 location, repoint any template that references the old `/var/tmp` path,
 and only then remove the originals by hand.
 
+## Updating the shipped poller and IPC client
+
+`tools/thermal-rgb.py` and `tools/ipc.py` are the sources for their copies
+under `/usr/local/share/lianli-panel`. After changing either, reinstall both
+and restart the poller:
+
+```bash
+sudo install -o root -g root -m 755 tools/thermal-rgb.py /usr/local/share/lianli-panel/thermal-rgb.py
+sudo install -o root -g root -m 644 tools/ipc.py /usr/local/share/lianli-panel/ipc.py
+systemctl --user restart lianli-thermal-rgb.service
+```
+
+`ipc.py` is shared by `rgb.sh`, `apply.sh` and `restore-sensor-mode.sh` too,
+so a daemon IPC change that breaks it breaks all of them at once.
+
 ## Cleaning up leftover probe logs
 
 `/var/tmp/lianli-stats/logs/` accumulates CSV output from ad hoc sensor

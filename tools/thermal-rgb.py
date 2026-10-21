@@ -40,6 +40,7 @@ _DEFAULTS = {
 }
 _cfg = dict(_DEFAULTS)
 _cfg_mtime = None
+_last_push_error = None
 
 
 def reload_config():
@@ -115,8 +116,18 @@ def push(device, rgb):
     effect = {"mode": "Static", "colors": [rgb], "speed": 2,
               "brightness": _cfg["brightness"], "direction": "Clockwise",
               "scope": "All", "disabled": False}
+    global _last_push_error
     r = call("SetRgbEffect", {"device_id": device, "zone": 0, "effect": effect})
-    return r.get("status") == "ok"
+    if r.get("status") == "ok":
+        _last_push_error = None
+        return True
+    # A refused push leaves the ring on its firmware rainbow with nothing in the
+    # journal; daemon 1.2.2's guarded writes broke it exactly that way.
+    message = r.get("message")
+    if message != _last_push_error:
+        print(f"SetRgbEffect refused: {message}", flush=True)
+        _last_push_error = message
+    return False
 
 
 def gpu_stream(poll_ms):
